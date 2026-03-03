@@ -715,13 +715,22 @@ export default function App() {
               <button
                 key={h.id}
                 onClick={() => setSelectedHood(h)}
-                className={`whitespace-nowrap px-6 py-3.5 rounded-2xl text-xs font-bold transition-all ${
+                className={`w-full text-left px-5 py-4 rounded-2xl transition-all border ${
                   selectedHood?.id === h.id
-                    ? 'bg-blue-600 text-white shadow-lg'
-                    : 'bg-slate-50 text-slate-400'
+                    ? 'bg-blue-600 text-white shadow-lg border-blue-400'
+                    : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100'
                 }`}
               >
-                {h.name}
+                {/* Nombre de la campana */}
+                <div className="text-xs font-black uppercase tracking-tighter">{h.name}</div>
+                
+                {/* Metadata: Lab y Tipo */}
+                <div className={`text-[9px] mt-1 font-bold flex justify-between uppercase opacity-70`}>
+                  <span>{h.lab}</span>
+                  <span className={selectedHood?.id === h.id ? 'text-blue-200' : 'text-blue-500'}>
+                    {h.hood_type}
+                  </span>
+                </div>
               </button>
             ))}
           </div>
