@@ -97,8 +97,8 @@ export default function App() {
     mountedRef.current = true
     return () => { mountedRef.current = false }
   }, [])
-
   const [authReady, setAuthReady] = useState(false)
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
   const [loginData, setLoginData] = useState({ email: '', password: '' })
   const [showRegModal, setShowRegModal] = useState(false)
@@ -207,34 +207,50 @@ export default function App() {
     if (mountedRef.current) setBookings(b)
   }
 
-  // CORRECCIÓN: setAuthReady(true) se ejecuta siempre para evitar el hang
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const res = await withTimeout(supabase.auth.getUser(), 5000, 'auth_timeout')
-        const authUser = res?.data?.user
-        if (authUser) {
-          const profile = await withTimeout(loadProfileForAuthUser(authUser), 5000, 'profile_timeout')
-          if (mountedRef.current && profile) setCurrentUser(profile)
+    useEffect(() => {
+      const init = async () => {
+        try {
+          // Usamos getSession para recuperar la sesión local sin esperar al servidor
+          const { data: { session }, error } = await withTimeout(
+            supabase.auth.getSession(),
+            5000,
+            'auth_timeout'
+          );
+          
+          if (error) throw error;
+
+          if (session?.user) {
+            const profile = await loadProfileForAuthUser(session.user);
+            if (mountedRef.current && profile) setCurrentUser(profile);
+          }
+        } catch (e) {
+          console.warn('Auth init problem:', e);
+          // Si hay error, limpiamos la sesión para que el login manual no se bloquee
+          await supabase.auth.signOut();
+        } finally {
+          if (mountedRef.current) setAuthReady(true);
         }
-      } catch (e) {
-        console.warn('Auth init problem:', e)
-      } finally {
-        if (mountedRef.current) setAuthReady(true)
-      }
-    }
-    init()
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const authUser = session?.user
-      if (!authUser) {
-        if (mountedRef.current) { setCurrentUser(null); setBookings([]); setHoods([]); }
-        return
-      }
-      const profile = await loadProfileForAuthUser(authUser)
-      if (mountedRef.current) setCurrentUser(profile)
-    })
-    return () => sub.subscription.unsubscribe()
-  }, [])
+      };
+
+      init();
+
+      const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          if (mountedRef.current) { 
+            setCurrentUser(null); 
+            setBookings([]); 
+            setHoods([]); 
+          }
+        } else if (session?.user) {
+          const profile = await loadProfileForAuthUser(session.user);
+          if (mountedRef.current) setCurrentUser(profile);
+        }
+      });
+
+      return () => {
+        if (sub?.subscription) sub.subscription.unsubscribe();
+      };
+    }, []);
 
   useEffect(() => {
     if (currentUser?.is_approved) {
@@ -248,14 +264,34 @@ export default function App() {
   }, [viewWeekOffset, selectedHood?.id, weekStart?.getTime(), cycleStart?.getTime()])
 
   const handleLogin = async (e) => {
-    e.preventDefault()
-    const { data, error } = await supabase.auth.signInWithPassword({ email: loginData.email.trim().toLowerCase(), password: loginData.password })
-    if (error || !data?.user) return alert('Error al iniciar sesión.')
-    const profile = await loadProfileForAuthUser(data.user)
-    if (!profile) { await supabase.auth.signOut(); return alert('No se encontró el perfil.'); }
-    setCurrentUser(profile)
-    if (profile.is_approved) refreshAll({ keepHood: false })
-  }
+    e.preventDefault();
+    if (isLoggingIn) return; // Evita clics dobles
+    
+    setIsLoggingIn(true); // Bloqueamos el botón visualmente
+    try {
+      const email = loginData.email.trim().toLowerCase();
+      const password = loginData.password;
+
+      // Usamos el timeout para que no se quede trabado 30 segundos
+      const res = await withTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        8000,
+        'login_timeout'
+      );
+
+      if (res.error) throw res.error;
+
+      const profile = await loadProfileForAuthUser(res.data.user);
+      if (!profile) throw new Error('No profile found');
+
+      setCurrentUser(profile);
+    } catch (err) {
+      console.error("Error de login:", err);
+      alert("Error al entrar: Revisa tu correo/contraseña o la conexión.");
+    } finally {
+      setIsLoggingIn(false); // IMPORTANTE: Esto libera el botón siempre
+    }
+  };
 
   const handleRegister = async (e) => {
     e.preventDefault()
@@ -329,7 +365,12 @@ export default function App() {
           <form onSubmit={handleLogin} className="space-y-3">
             <input required type="email" placeholder="email@ibt.unam.mx" className="w-full px-6 py-4 bg-slate-50 rounded-2xl outline-none" onChange={e => setLoginData({...loginData, email: e.target.value})} />
             <input required type="password" placeholder="Contraseña" className="w-full px-6 py-4 bg-slate-50 rounded-2xl outline-none" onChange={e => setLoginData({...loginData, password: e.target.value})} />
-            <button className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl">Entrar al Lab</button>
+            <button 
+              disabled={isLoggingIn}
+              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition-all disabled:opacity-50"
+            >
+              {isLoggingIn ? "Conectando..." : "Entrar al Lab"}
+            </button>
           </form>
           <button onClick={() => setShowRegModal(true)} className="mt-6 text-xs font-bold text-blue-600 underline">Solicitar Acceso</button>
         </div>
