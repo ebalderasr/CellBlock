@@ -250,15 +250,23 @@ export default function App() {
   // ---------- Boot: attach to auth state ----------
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase.auth.getUser()
-      const authUser = data?.user
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (error) throw error // Forzamos el catch si hay error de sesión
 
-      if (authUser) {
-        const profile = await loadProfileForAuthUser(authUser)
-        if (profile) setCurrentUser(profile)
+        const authUser = data?.user
+        if (authUser) {
+          const profile = await loadProfileForAuthUser(authUser)
+          if (profile) setCurrentUser(profile)
+        }
+      } catch (err) {
+        console.error("Error durante el arranque:", err)
+        // Opcional: limpiar sesión si el error es de autenticación
+        await supabase.auth.signOut() 
+      } finally {
+        // Pase lo que pase, quitamos la pantalla de carga
+        setAuthReady(true) 
       }
-
-      setAuthReady(true)
     }
 
     init()
