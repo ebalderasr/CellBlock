@@ -242,59 +242,77 @@ export default function App() {
     if (mountedRef.current) setBookings(b)
   }
 
-// DO NOT TOUCH: Auth init / sensors (Versión Estabilidad Chrome)
-  useEffect(() => {
-    let active = true;
+  // DO NOT TOUCH: Auth init / sensors
+useEffect(() => {
+  let cancelled = false
 
-    const init = async () => {
-      try {
-        const { data: { session }, error } = await withTimeout(
-          supabase.auth.getSession(), 
-          5000, 
-          'auth_timeout'
-        );
+  const safeLocalSignOut = async () => {
+    try {
+      // IMPORTANTÍSIMO: no bloquear el arranque esperando red
+      // scope: 'local' evita invalidar “global” y suele ser más robusto
+      await withTimeout(supabase.auth.signOut({ scope: 'local' }), 2500, 'signout_timeout')
+    } catch (e) {
+      // Si falla, no pasa nada: lo importante es liberar la UI
+      console.warn('safeLocalSignOut:', e)
+    }
+  }
 
-        if (error) throw error;
+  const init = async () => {
+    try {
+      // getSession es local-first; aun así lo acotamos
+      const { data: { session }, error } = await withTimeout(
+        supabase.auth.getSession(),
+        5000,
+        'auth_timeout'
+      )
 
-        if (active && session?.user) {
-          const profile = await loadProfileForAuthUser(session.user);
-          if (active && profile) setCurrentUser(profile);
-        }
-      } catch (e) {
-        console.warn('Auth init problem:', e);
-        // Solo cerramos sesión si es un error real, no un timeout
-        if (e.message !== 'auth_timeout') await supabase.auth.signOut();
-      } finally {
-        if (active) {
-          // El setTimeout de 100ms es el "truco" para que Chrome 
-          // renderice el cambio de estado tras un F5
-          setTimeout(() => setAuthReady(true), 100);
-        }
+      if (error) throw error
+
+      if (session?.user) {
+        const profile = await withTimeout(loadProfileForAuthUser(session.user), 5000, 'profile_timeout')
+        if (!cancelled && mountedRef.current) setCurrentUser(profile || null)
       }
-    };
+    } catch (e) {
+      console.warn('Auth init problem:', e)
+      // NO bloquees el finally con signOut global
+      void safeLocalSignOut()
+      if (!cancelled && mountedRef.current) setCurrentUser(null)
+    } finally {
+      if (!cancelled && mountedRef.current) setAuthReady(true)
+    }
+  }
 
-    init();
+  init()
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!active) return;
-      
+  const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+    try {
       if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        setBookings([]);
-        setHoods([]);
-      } else if (event === 'SIGNED_IN' && session?.user) {
-        // Evitamos recargar si ya tenemos al usuario
-        const profile = await loadProfileForAuthUser(session.user);
-        if (active) setCurrentUser(profile);
+        if (!cancelled && mountedRef.current) {
+          setCurrentUser(null)
+          setBookings([])
+          setHoods([])
+        }
+        return
       }
-    });
 
-    return () => {
-      active = false;
-      if (sub?.subscription) sub.subscription.unsubscribe();
-    };
-  }, []);
-  
+      if (session?.user) {
+        const profile = await withTimeout(loadProfileForAuthUser(session.user), 5000, 'profile_timeout')
+        if (!cancelled && mountedRef.current) setCurrentUser(profile || null)
+      }
+    } catch (e) {
+      console.warn('onAuthStateChange problem:', e)
+      // Si algo raro pasa en Chrome, soltamos UI sin colgar
+      void safeLocalSignOut()
+      if (!cancelled && mountedRef.current) setCurrentUser(null)
+    }
+  })
+
+  return () => {
+    cancelled = true
+    if (sub?.subscription) sub.subscription.unsubscribe()
+  }
+}, [])
+
   // DO NOT TOUCH: Data sync triggers
   useEffect(() => {
     if (currentUser?.is_approved) {
