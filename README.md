@@ -1,130 +1,102 @@
-# 🛰️ CellBlock | Host Cell Lab Suite
+# CellBlock
 
-> **Smart hood booking and lab flow coordination. Fast, clear, and lab-ready.**
-
-CellBlock is a dedicated web app for managing laminar flow hood schedules and synchronizing daily operations within the Palomares-Ramírez (GPR) group.
-It is an official module of HostCell, a suite of practical laboratory and bioprocess tools built by Emiliano Balderas (IBt-UNAM).
+> **CellBlock** is a professional-grade scheduling engine designed to coordinate the use of critical equipment in biotechnology and research environments. As part of the **HostCell** suite, it provides a high-performance, real-time booking interface optimized for the lab bench.
 
 <p align="center">
-<img src="[https://cdn-icons-png.flaticon.com/512/3022/3022513.png](https://www.google.com/search?q=https://cdn-icons-png.flaticon.com/512/3022/3022513.png)" width="180" alt="CellBlock Logo">
+<img src="[https://ebalderasr.github.io/CellBlock/icon-512.png](https://www.google.com/search?q=https://ebalderasr.github.io/CellBlock/icon-512.png)" width="180" alt="CellBlock Logo">
 </p>
 
 <p align="center">
-<a href="[https://ebalderasr.github.io/CellBlock/](https://www.google.com/search?q=https://ebalderasr.github.io/CellBlock/)">
+<a href="[https://ebalderasr.github.io/CellBlock/](https://ebalderasr.github.io/CellBlock/)">
 <img src="[https://img.shields.io/badge/](https://img.shields.io/badge/)🚀_Launch_Live_App-CellBlock-2563eb?style=for-the-badge&labelColor=000000" alt="Launch CellBlock App">
 </a>
 </p>
 
 <p align="center">
-<a href="[https://github.com/ebalderasr/CellBlock](https://www.google.com/search?q=https://github.com/ebalderasr/CellBlock)">Repo</a> •
-<a href="[https://ebalderasr.github.io/CellBlock/](https://www.google.com/search?q=https://ebalderasr.github.io/CellBlock/)">Live App</a>
+<a href="[https://github.com/ebalderasr/CellBlock](https://github.com/ebalderasr/CellBlock)">Repo</a> •
+<a href="[https://ebalderasr.github.io/CellBlock/](https://ebalderasr.github.io/CellBlock/)">Live App</a>
 </p>
 
 ---
 
-## What is CellBlock?
+## A Flexible & Customizable Framework
 
-**CellBlock** helps coordinate the daily operations of Lab 10-401 by providing a centralized, real-time booking system for sterile flow hoods.
+**CellBlock** is built to be an adaptable solution that can be tailored to the specific operational needs of any research group:
 
-The app is focused on three pillars:
-
-* **Availability**: 24/7 access for night-shifts or early-morning operations.
-* **Fairness**: Automated rules to prevent schedule over-saturation (3h limit).
-* **Traceability**: Quick identification of users via 3-letter codes and experiment notes.
-
-It is designed for rapid bench-side booking, allowing scientists to focus on their cell cultures rather than logistics.
+* **Unlimited Equipment Configuration**: Dynamically manage laminar flow hoods, bioreactors, microscopes, or any shared resource.
+* **Custom Usage Policies**: Define specific time limits, booking windows, and access permissions for different user levels.
+* **Adaptive Visuals**: The interface can be branded and adjusted to match the institutional identity of any laboratory.
+* **Automated Workflow Logic**: Features an intelligent "sliding window" system to manage future schedule releases automatically.
 
 ---
 
-## ✅ Operational Logic (The GPR Ruleset)
+## 📸 Application Interface
 
-CellBlock implements specific laboratory policies to ensure efficient workflow distribution:
+### Desktop View
 
-### 1) The 3-Hour Consecutive Rule
+Designed for comprehensive planning and administrative management.
 
-To ensure all members of the **GPR** have access to sterile workspaces, the system enforces a strict time limit:
+<p align="center">
+<img src="screenshots/pc.png" alt="CellBlock Desktop Interface" width="100%">
+</p>
 
-* A user cannot book more than **3 consecutive hours** in the same equipment.
-* The algorithm scans the entire day's sequence; if a new booking creates a 4-hour chain, the request is automatically blocked.
+### Mobile View
 
-### 2) Fortnightly Schedule Release
+Optimized for rapid booking and quick checks directly at the lab station.
 
-The agenda is managed in blocks of two weeks:
-
-* **Weeks 1 and 2**: Always open for regular planning.
-* **Weeks 3 and 4**: Released every **Saturday at 11:00 AM (CDMX time)**.
-* *Note: Administrators have bypass permissions for long-term project planning.*
-
-### 3) Dual Login & Identity
-
-Users can access the system using:
-
-* **Institutional Email** (@ibt.unam.mx).
-* **3-Letter Code** (e.g., EBR, ARC).
-This ensures the schedule remains legible and professional on small screens.
+<p align="center">
+<img src="screenshots/mobil.jpeg" alt="CellBlock Mobile Interface" width="400">
+</p>
 
 ---
 
-## ⚡ Features
+## 🔬 Implementation: Palomares-Ramírez Group (IBt-UNAM)
 
-* **24/7 Scheduling:** Full hourly grid for all days of the week.
-* **Role-Based Access:** Admin accounts can manage or release bookings from any user.
-* **Experiment Notes:** Optional observations for each slot (e.g., "Media prep", "Media change only").
-* **Mobile-First UI:** Optimized for lab use with a "sticky time" column and PWA capabilities.
-* **PWA Ready:** Installable on PC, Android, and iOS for an app-like experience.
+This instance is specifically customized for **GPR-Lab** at the **Institute of Biotechnology, UNAM**, managing five specialized work stations with distinct biosafety requirements:
 
----
-
-## 🔬 Typical Use Cases
-
-CellBlock is useful for:
-
-* Planning **complex passaging** schedules in advance.
-* Coordinating **long-term bioreactor** sampling windows.
-* Managing **emergency sterile work** during off-hours.
-* Reducing conflicts and "double-booking" errors in Lab 10-401.
+* **Hood 1** ( Virus-free).
+* **Hood 2** ( Virus-free).
+* **Hood 3** ( Virus).
+* **Hood 4** ( Insect Cells).
+* **Bacteria Hood** (Lab 401 | Bacteria).
 
 ---
 
-## 📱 Installation (PWA)
+## ✅ Operational Logic & Rules
 
-CellBlock can be installed as a Progressive Web App (PWA) for faster access at the bench.
+To ensure fair equipment distribution and efficient lab flow, the following rules are implemented:
 
-### Android / PC (Chrome, Edge)
+### 1) The 3-Hour Limit
 
-* Open the live app in your browser.
-* Look for the **Install Icon** in the address bar (PC) or the **Install App** prompt (Android).
+* Users are restricted to a maximum of **3 consecutive hours** per equipment in a single day.
+* This prevents schedule saturation and ensures all group members have access to workspace.
 
-### iPhone / iPad (Safari)
+### 2) 4-Week Sliding Window
 
-* Open the live app in Safari.
-* Tap the **Share** button.
-* Select **Add to Home Screen**.
+The system operates on a rolling schedule with automated release triggers:
+
+* **Weeks 1 & 2**: Always open for standard planning and passaging.
+* **Weeks 3 & 4**: Locked for standard users and released automatically every **Saturday at 11:00 AM**.
+* **Rollover**: Every Monday at 00:00, the schedule shifts; former weeks 3 and 4 become weeks 1 and 2, and new weeks are generated.
+
+---
+
+## ⚡ Technical Features
+
+* **24/7 Scheduling**: Full grid support for night shifts and weekend monitoring.
+* **Experiment Notes**: Real-time communication via booking notes (e.g., "Media change only", "Cleaning required").
+* **PWA Ready**: Installable on Android, iOS, and PC as a standalone application.
+* **Secure Access**: Managed through institutional email or unique 3-letter codes for quick ID.
 
 ---
 
 ## 🛠️ Technical Support
 
-**CellBlock** is maintained by the laboratory's technical support team:
+**CellBlock** is maintained by the lab's technical support:
 
-* **Admin/Support**: Emiliano Balderas
-* **Contact**: [emiliano.balderas@ibt.unam.mx](mailto:emiliano.balderas@ibt.unam.mx)
-
-Contact support for account approvals, role upgrades, or reporting system issues.
-
----
-
-## 🧩 About Host Cell
-
-**Host Cell** is a growing suite of practical lab and bioprocess tools focused on:
-
-* Clarity & Speed
-* Reproducibility
-* Real-world usability at the bench
-
-CellBlock is a dedicated module for GPR workflow synchronization.
+* **Admin/Support**: Emiliano Balderas.
+* **Contact**: [emiliano.balderas@ibt.unam.mx](mailto:emiliano.balderas@ibt.unam.mx).
 
 ---
 
 **Host Cell Lab Suite** – *Practical tools for high-performance biotechnology.*
-
