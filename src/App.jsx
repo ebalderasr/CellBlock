@@ -39,18 +39,60 @@ import {
 const ADMIN_CONFIG = {
   name: 'Emiliano Balderas',
   email: 'emiliano.balderas@ibt.unam.mx',
-  group: 'Grupo Palomares-Ramírez | Instituto de biotecnología UNAM',
-  suite: 'HostCell',
-  description: 'Practical tools for high-performance biotechnology',
 }
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-)
+// Hardening opcional: si faltan envs, falla rápido
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  throw new Error(
+    'Missing Supabase env vars: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY'
+  )
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const DAYS_NAME = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM']
+
+// ----- Hood labels -----
+const HOOD_USE_LABEL = {
+  'virus-free': 'Virus-free',
+  virus: 'Virus',
+  insect: 'Células de insecto',
+  bacteria: 'Bacterias',
+}
+function formatHoodUse(biosafety_use) {
+  return HOOD_USE_LABEL[biosafety_use] || (biosafety_use ? String(biosafety_use) : 'Uso no especificado')
+}
+
+// ----- Calendar cycle (2-week rolling cycle) -----
+// Anchor Monday for stable two-week grouping. Any Monday works.
+const CYCLE_ANCHOR_MONDAY = new Date(2026, 0, 5, 0, 0, 0, 0) // 2026-01-05 local time
+
+function getCycleStart(now) {
+  const nowWeekStart = startOfWeek(now, { weekStartsOn: 1 })
+  const anchorWeekStart = startOfWeek(CYCLE_ANCHOR_MONDAY, { weekStartsOn: 1 })
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000
+  const weeksSince = Math.floor((nowWeekStart.getTime() - anchorWeekStart.getTime()) / msPerWeek)
+  const cycleIndex = Math.floor(weeksSince / 2) // 2-week cycles
+  return addWeeks(anchorWeekStart, cycleIndex * 2)
+}
+
+function getReleaseTimeForCycle(cycleStart) {
+  // Saturday of Week 2 at 11:00 AM
+  // cycleStart = Monday of Week 1
+  // Week 2 starts at cycleStart + 1 week
+  // Saturday = +5 days from Monday
+  const week2Monday = addWeeks(cycleStart, 1)
+  const saturdayWeek2 = addDays(week2Monday, 5)
+  return setMinutes(setHours(saturdayWeek2, 11), 0)
+}
+
+function formatReleaseMessage(releaseTime) {
+  // “sábado 08/03 a las 11:00 AM”
+  return `Los horarios de esas semanas se liberan el sábado ${format(releaseTime, 'dd/MM')} a las 11:00 AM.`
+}
 
 export default function App() {
   // Auth/Profile
@@ -64,14 +106,14 @@ export default function App() {
   const [regData, setRegData] = useState({ name: '', email: '', code: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
 
-  // PWA modal (antes tenías setShowPwaModal pero no existía)
+  // PWA modal
   const [showPwaModal, setShowPwaModal] = useState(false)
 
   // Data
   const [hoods, setHoods] = useState([])
   const [selectedHood, setSelectedHood] = useState(null)
   const [bookings, setBookings] = useState([])
-  const [viewWeekOffset, setViewWeekOffset] = useState(0)
+  const [viewWeekOffset, setViewWeekOffset] = useState(0) // 0..3
   const [loadingData, setLoadingData] = useState(false)
 
   // Booking details / notes
@@ -84,28 +126,32 @@ export default function App() {
   const [pendingProfiles, setPendingProfiles] = useState([])
   const [loadingApprovals, setLoadingApprovals] = useState(false)
 
-  // ---------- Helpers ----------
+  // "Now" ticker to allow cycle rollover at Sunday midnight automatically
+  const [nowTick, setNowTick] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(new Date()), 60 * 1000) // every minute
+    return () => clearInterval(id)
+  }, [])
+
+  // ----- Cycle-based week window -----
+  const cycleStart = useMemo(() => getCycleStart(nowTick), [nowTick])
+  const releaseTime = useMemo(() => getReleaseTimeForCycle(cycleStart), [cycleStart])
+
   const weekStart = useMemo(() => {
-    return startOfWeek(addWeeks(new Date(), viewWeekOffset), { weekStartsOn: 1 })
-  }, [viewWeekOffset])
+    return startOfWeek(addWeeks(cycleStart, viewWeekOffset), { weekStartsOn: 1 })
+  }, [cycleStart, viewWeekOffset])
 
   const weekEnd = useMemo(() => addWeeks(weekStart, 1), [weekStart])
 
   const isWeekLocked = (offset) => {
     if (currentUser?.is_admin) return false
+    // Week 1 & 2 open (offset 0,1)
     if (offset <= 1) return false
-
-    // Replica UI lock (pero el backend también debe validar)
-    const now = new Date()
-    const releaseTime = setMinutes(
-      setHours(addDays(startOfWeek(now, { weekStartsOn: 1 }), 12), 11),
-      0
-    )
-    return !isAfter(now, releaseTime)
+    // Week 3 & 4 locked until Saturday of Week 2 at 11:00
+    return !isAfter(new Date(), releaseTime)
   }
 
   const bookingMap = useMemo(() => {
-    // key robusta por milisegundos (start_time viene como ISO)
     const m = new Map()
     for (const b of bookings) {
       const t = new Date(b.start_time).getTime()
@@ -244,12 +290,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, currentUser?.is_approved])
 
-  // Reload bookings when week/hood changes
+  // Reload bookings when week/hood/cycle changes
   useEffect(() => {
     if (!currentUser?.is_approved) return
     refreshBookingsOnly()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewWeekOffset, selectedHood?.id])
+  }, [viewWeekOffset, selectedHood?.id, cycleStart?.getTime()])
 
   // ---------- Auth handlers ----------
   const handleLogin = async (e) => {
@@ -269,19 +315,16 @@ export default function App() {
 
     const profile = await loadProfileForAuthUser(data.user)
     if (!profile) {
-      // En teoría el trigger de profiles debe existir. Si no existe, esto te avisa.
       await supabase.auth.signOut()
       return alert('Tu cuenta existe, pero no encuentro profile. Revisa el trigger de profiles en Supabase.')
     }
 
     setCurrentUser(profile)
 
-    // Si no aprobado, no lo sacamos: mostramos pantalla “Pendiente” + soporte.
     if (!profile.is_approved) {
       return
     }
 
-    // Datos
     await refreshAll({ keepHood: false })
     if (profile.is_admin) await refreshApprovals()
   }
@@ -312,14 +355,11 @@ export default function App() {
       return alert('No pude registrar el usuario. Revisa consola.')
     }
 
-    // Puede requerir confirmación por email según tu configuración de Auth.
-    // De cualquier forma, el profile se crea por trigger cuando auth.users inserta.
     setShowRegModal(false)
     alert('Registro creado. Tu acceso quedará pendiente de aprobación por el admin.')
 
-    // Si Supabase devuelve user pero no sesión (por email confirmation), no intentamos entrar.
     if (data?.session?.user) {
-      // En caso de auto-login, cae en onAuthStateChange y cargará profile.
+      // onAuthStateChange handles it
     }
   }
 
@@ -328,10 +368,7 @@ export default function App() {
     const email = resetEmail.trim().toLowerCase()
     if (!email.includes('@')) return alert('Ingresa un correo válido.')
 
-    // redirectTo debe ser tu URL real de GH Pages para el flujo de reset, si lo usas.
-    // Aun si no está configurado perfecto, el email de reset suele funcionar.
     const { error } = await supabase.auth.resetPasswordForEmail(email)
-
     if (error) {
       console.error(error)
       return alert('No pude enviar el correo de restablecimiento.')
@@ -345,16 +382,17 @@ export default function App() {
   const handleBooking = async (day, hour) => {
     if (!currentUser?.is_approved) return alert('Tu cuenta está pendiente de aprobación.')
     if (!selectedHood?.id) return alert('No hay equipo seleccionado.')
-    if (isWeekLocked(viewWeekOffset)) return alert('Agenda bloqueada hasta el sábado 11:00 AM.')
 
-    // Bloqueo de UX: evita doble click
+    if (isWeekLocked(viewWeekOffset)) {
+      return alert(formatReleaseMessage(releaseTime))
+    }
+
     if (bookingBusy) return
     setBookingBusy(true)
 
     try {
       const targetDate = setHours(addDays(weekStart, day), hour)
 
-      // UX check local (el backend también valida max 3 consecutivas si lo implementaste)
       const dayHours = bookings
         .filter(
           (b) =>
@@ -679,16 +717,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 overflow-x-hidden">
       <nav className="bg-white border-b border-slate-100 px-6 md:px-10 py-5 flex justify-between items-center sticky top-0 z-40">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <div className="bg-blue-600 p-2.5 rounded-2xl text-white shadow-lg shadow-blue-100">
             <ShieldCheck size={22} />
           </div>
           <div className="leading-tight">
-            <h1 className="text-xl font-black tracking-tighter italic">
-              CellBlock <span className="text-slate-300 font-normal">| {ADMIN_CONFIG.suite}</span>
-            </h1>
+            <h1 className="text-xl font-black tracking-tighter">CellBlock</h1>
+            <p className="text-[10px] font-bold text-slate-600 tracking-tight">
+              Host Cell Lab Suite – Practical tools for high-performance biotechnology.
+            </p>
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">
-              {ADMIN_CONFIG.group}
+              Grupo Palomares-Ramirez | Instituto de Biotecnología UNAM
             </p>
           </div>
         </div>
@@ -718,17 +757,14 @@ export default function App() {
                 className={`w-full text-left px-5 py-4 rounded-2xl transition-all border ${
                   selectedHood?.id === h.id
                     ? 'bg-blue-600 text-white shadow-lg border-blue-400'
-                    : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100'
+                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
                 }`}
               >
-                {/* Nombre de la campana */}
                 <div className="text-xs font-black uppercase tracking-tighter">{h.name}</div>
-                
-                {/* Metadata: Lab y Tipo */}
-                <div className={`text-[9px] mt-1 font-bold flex justify-between uppercase opacity-70`}>
-                  <span>{h.lab}</span>
-                  <span className={selectedHood?.id === h.id ? 'text-blue-200' : 'text-blue-500'}>
-                    {h.hood_type}
+                <div className="text-[10px] mt-1 font-bold flex justify-between uppercase opacity-80">
+                  <span>Lab {h.lab_room || '—'}</span>
+                  <span className={selectedHood?.id === h.id ? 'text-blue-200' : 'text-blue-600'}>
+                    {formatHoodUse(h.biosafety_use)}
                   </span>
                 </div>
               </button>
@@ -781,35 +817,46 @@ export default function App() {
         </aside>
 
         <main className="col-span-12 lg:col-span-10 space-y-6">
-          <div className="flex overflow-x-auto gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100 scrollbar-hide">
+          {/* Selected hood info */}
+          {selectedHood && (
+            <div className="px-2">
+              <div className="text-sm font-black">{selectedHood.name}</div>
+              <div className="text-xs text-slate-500 font-bold">
+                {formatHoodUse(selectedHood.biosafety_use)} · Lab {selectedHood.lab_room || '—'}
+              </div>
+            </div>
+          )}
+
+          <div className="flex overflow-x-auto gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 scrollbar-hide">
             {[0, 1, 2, 3].map((offset) => (
               <button
                 key={offset}
                 onClick={() => setViewWeekOffset(offset)}
                 className={`flex-1 min-w-[100px] py-3 text-[10px] font-black rounded-xl transition-all ${
-                  viewWeekOffset === offset ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-300'
+                  viewWeekOffset === offset ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'
                 }`}
+                title={isWeekLocked(offset) ? formatReleaseMessage(releaseTime) : 'Disponible'}
               >
                 SEMANA {offset + 1} {isWeekLocked(offset) ? '🔒' : ''}
               </button>
             ))}
           </div>
 
-          <div className="bg-white rounded-[3rem] border border-slate-100 shadow-2xl overflow-hidden relative">
+          <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl overflow-hidden relative">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse table-fixed min-w-[800px]">
                 <thead>
-                  <tr className="bg-slate-50/50 border-b border-slate-100">
-                    <th className="w-20 p-5 text-[10px] font-black text-slate-300 uppercase sticky left-0 bg-slate-50/80 backdrop-blur-md z-20">
+                  <tr className="bg-slate-50/50 border-b border-slate-200">
+                    <th className="w-20 p-5 text-[10px] font-black text-slate-400 uppercase sticky left-0 bg-slate-50/80 backdrop-blur-md z-20">
                       Hora
                     </th>
                     {DAYS_NAME.map((d, i) => (
                       <th
                         key={d}
-                        className="p-5 text-[11px] font-black border-l border-slate-100 uppercase text-slate-700"
+                        className="p-5 text-[11px] font-black border-l border-slate-200 uppercase text-slate-700"
                       >
                         {d}
-                        <span className="block text-[9px] text-slate-300 font-normal mt-1">
+                        <span className="block text-[9px] text-slate-400 font-normal mt-1">
                           {format(addDays(weekStart, i), 'dd/MM')}
                         </span>
                       </th>
@@ -817,10 +864,10 @@ export default function App() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-slate-100">
                   {HOURS.map((hour) => (
                     <tr key={hour}>
-                      <td className="p-4 text-[10px] font-black text-slate-200 text-center sticky left-0 bg-white/90 backdrop-blur-md z-20 border-r border-slate-50">
+                      <td className="p-4 text-[10px] font-black text-slate-400 text-center sticky left-0 bg-white/90 backdrop-blur-md z-20 border-r border-slate-200">
                         {hour}:00
                       </td>
 
@@ -832,14 +879,14 @@ export default function App() {
                         const showNote = booking && hasNotes(booking)
 
                         return (
-                          <td key={day} className="border-l border-slate-50 h-16 p-1.5 relative">
+                          <td key={day} className="border-l border-slate-200 h-16 p-1.5 relative">
                             {booking ? (
                               <button
                                 onClick={() => openBookingDetails(booking)}
                                 className={`h-full w-full rounded-2xl p-3 flex flex-col justify-center transition-all border text-left ${
                                   isMine
                                     ? 'bg-blue-600 border-blue-400 text-white shadow-lg'
-                                    : 'bg-slate-50 border-slate-100 text-slate-700'
+                                    : 'bg-slate-50 border-slate-200 text-slate-700'
                                 }`}
                               >
                                 <div className="flex items-center justify-between gap-2">
@@ -847,7 +894,6 @@ export default function App() {
                                     {booking.user_name}
                                   </span>
 
-                                  {/* Indicador de notas: cambia ligeramente el color */}
                                   {showNote && (
                                     <span
                                       className={`inline-flex items-center gap-1 text-[10px] font-black ${
@@ -864,10 +910,14 @@ export default function App() {
                               <button
                                 disabled={isWeekLocked(viewWeekOffset) || bookingBusy || loadingData}
                                 onClick={() => handleBooking(day, hour)}
-                                className="w-full h-full rounded-2xl border-2 border-dashed border-slate-100 hover:border-blue-200 transition-all flex items-center justify-center opacity-40 hover:opacity-100 disabled:opacity-20"
-                                title={isWeekLocked(viewWeekOffset) ? 'Bloqueado' : 'Reservar'}
+                                className="w-full h-full rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-300 transition-all flex items-center justify-center opacity-40 hover:opacity-100 disabled:opacity-20"
+                                title={
+                                  isWeekLocked(viewWeekOffset)
+                                    ? formatReleaseMessage(releaseTime)
+                                    : 'Reservar'
+                                }
                               >
-                                <Plus size={18} className="text-slate-100" />
+                                <Plus size={18} className="text-slate-300" />
                               </button>
                             )}
                           </td>
@@ -941,9 +991,7 @@ export default function App() {
                 </p>
 
                 <textarea
-                  disabled={
-                    !(currentUser.is_admin || selectedBooking.user_id === currentUser.id)
-                  }
+                  disabled={!(currentUser.is_admin || selectedBooking.user_id === currentUser.id)}
                   value={tempNotes}
                   onChange={(e) => setTempNotes(e.target.value)}
                   className="w-full p-5 bg-slate-50 rounded-2xl text-sm border-none focus:ring-2 focus:ring-blue-500 min-h-[150px] outline-none"
