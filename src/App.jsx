@@ -11,7 +11,6 @@ import {
   parseISO,
   isSameDay,
 } from 'date-fns'
-import { es } from 'date-fns/locale'
 import {
   ShieldCheck,
   Plus,
@@ -51,15 +50,28 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const DAYS_NAME = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM']
 
-// ----- Hood labels -----
+// ----- Manual Hood metadata (no depende de columnas) -----
+const HOOD_META = {
+  'Campana 1': { lab: 'Lab 10', useKey: 'virus-free' },
+  'Campana 2': { lab: 'Lab 401', useKey: 'virus-free' },
+  'Campana 3': { lab: 'Lab 401', useKey: 'virus' },
+  'Campana 4': { lab: 'Lab 401', useKey: 'insect' },
+  'Campana 5': { lab: 'Lab 401', useKey: 'bacteria' },
+}
+
 const HOOD_USE_LABEL = {
   'virus-free': 'Virus-free',
   virus: 'Virus',
   insect: 'Células de insecto',
   bacteria: 'Bacterias',
 }
-function formatHoodUse(biosafety_use) {
-  return HOOD_USE_LABEL[biosafety_use] || (biosafety_use ? String(biosafety_use) : 'Uso no especificado')
+
+function getHoodMeta(h) {
+  const name = (h?.name || '').trim()
+  const key = Object.keys(HOOD_META).find((k) => name.startsWith(k))
+  if (!key) return { lab: '—', useLabel: 'Uso no especificado', useKey: null }
+  const meta = HOOD_META[key]
+  return { lab: meta.lab, useLabel: HOOD_USE_LABEL[meta.useKey] || 'Uso no especificado', useKey: meta.useKey }
 }
 
 // ----- Calendar cycle (2-week rolling) -----
@@ -95,28 +107,37 @@ export default function App() {
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
+
   const [authReady, setAuthReady] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
+
   const [loginData, setLoginData] = useState({ email: '', password: '' })
   const [showRegModal, setShowRegModal] = useState(false)
   const [showResetModal, setShowResetModal] = useState(false)
   const [regData, setRegData] = useState({ name: '', email: '', code: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
+
   const [showPwaModal, setShowPwaModal] = useState(false)
+
   const [hoods, setHoods] = useState([])
   const [selectedHood, setSelectedHood] = useState(null)
   const [bookings, setBookings] = useState([])
   const [viewWeekOffset, setViewWeekOffset] = useState(0)
   const [loadingData, setLoadingData] = useState(false)
+
   const [selectedBooking, setSelectedBooking] = useState(null)
   const [tempNotes, setTempNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
   const [bookingBusy, setBookingBusy] = useState(false)
+
   const [pendingProfiles, setPendingProfiles] = useState([])
   const [loadingApprovals, setLoadingApprovals] = useState(false)
+
   const [nowTick, setNowTick] = useState(() => new Date())
 
   useEffect(() => {
@@ -126,7 +147,10 @@ export default function App() {
 
   const cycleStart = useMemo(() => getCycleStart(nowTick), [nowTick])
   const releaseTime = useMemo(() => getReleaseTimeForCycle(cycleStart), [cycleStart])
-  const weekStart = useMemo(() => startOfWeek(addWeeks(cycleStart, viewWeekOffset), { weekStartsOn: 1 }), [cycleStart, viewWeekOffset])
+  const weekStart = useMemo(
+    () => startOfWeek(addWeeks(cycleStart, viewWeekOffset), { weekStartsOn: 1 }),
+    [cycleStart, viewWeekOffset]
+  )
   const weekEnd = useMemo(() => addWeeks(weekStart, 1), [weekStart])
 
   const isWeekLocked = (offset) => {
@@ -162,20 +186,29 @@ export default function App() {
 
   const fetchHoods = async () => {
     const { data, error } = await supabase.from('hoods').select('*').order('name')
-    return error ? [] : (data || [])
+    return error ? [] : data || []
   }
 
   const fetchBookingsForWeekAndHood = async (hoodId, start, end) => {
     if (!hoodId) return []
-    const { data, error } = await supabase.from('bookings').select('*').eq('hood_id', hoodId).gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
-    return error ? [] : (data || [])
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('hood_id', hoodId)
+      .gte('start_time', start.toISOString())
+      .lt('start_time', end.toISOString())
+    return error ? [] : data || []
   }
 
   const refreshApprovals = async () => {
     if (!currentUser?.is_admin) return
     setLoadingApprovals(true)
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('is_approved', false).order('created_at', { ascending: true })
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('is_approved', false)
+        .order('created_at', { ascending: true })
       if (!error && mountedRef.current) setPendingProfiles(data || [])
     } finally {
       if (mountedRef.current) setLoadingApprovals(false)
@@ -189,9 +222,11 @@ export default function App() {
       const h = await fetchHoods()
       if (!mountedRef.current) return
       setHoods(h)
+
       let hood = selectedHood
       if (!keepHood || !hood) hood = h?.[0] || null
       setSelectedHood(hood)
+
       if (hood?.id) {
         const b = await fetchBookingsForWeekAndHood(hood.id, weekStart, weekEnd)
         if (mountedRef.current) setBookings(b)
@@ -207,136 +242,181 @@ export default function App() {
     if (mountedRef.current) setBookings(b)
   }
 
-    useEffect(() => {
-      const init = async () => {
-        try {
-          // Usamos getSession para recuperar la sesión local sin esperar al servidor
-          const { data: { session }, error } = await withTimeout(
-            supabase.auth.getSession(),
-            5000,
-            'auth_timeout'
-          );
-          
-          if (error) throw error;
+// DO NOT TOUCH: Auth init / sensors (Versión Estabilidad Chrome)
+  useEffect(() => {
+    let active = true;
 
-          if (session?.user) {
-            const profile = await loadProfileForAuthUser(session.user);
-            if (mountedRef.current && profile) setCurrentUser(profile);
-          }
-        } catch (e) {
-          console.warn('Auth init problem:', e);
-          // Si hay error, limpiamos la sesión para que el login manual no se bloquee
-          await supabase.auth.signOut();
-        } finally {
-          if (mountedRef.current) setAuthReady(true);
-        }
-      };
+    const init = async () => {
+      try {
+        const { data: { session }, error } = await withTimeout(
+          supabase.auth.getSession(), 
+          5000, 
+          'auth_timeout'
+        );
 
-      init();
+        if (error) throw error;
 
-      const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'SIGNED_OUT') {
-          if (mountedRef.current) { 
-            setCurrentUser(null); 
-            setBookings([]); 
-            setHoods([]); 
-          }
-        } else if (session?.user) {
+        if (active && session?.user) {
           const profile = await loadProfileForAuthUser(session.user);
-          if (mountedRef.current) setCurrentUser(profile);
+          if (active && profile) setCurrentUser(profile);
         }
-      });
+      } catch (e) {
+        console.warn('Auth init problem:', e);
+        // Solo cerramos sesión si es un error real, no un timeout
+        if (e.message !== 'auth_timeout') await supabase.auth.signOut();
+      } finally {
+        if (active) {
+          // El setTimeout de 100ms es el "truco" para que Chrome 
+          // renderice el cambio de estado tras un F5
+          setTimeout(() => setAuthReady(true), 100);
+        }
+      }
+    };
 
-      return () => {
-        if (sub?.subscription) sub.subscription.unsubscribe();
-      };
-    }, []);
+    init();
 
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!active) return;
+      
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        setBookings([]);
+        setHoods([]);
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        // Evitamos recargar si ya tenemos al usuario
+        const profile = await loadProfileForAuthUser(session.user);
+        if (active) setCurrentUser(profile);
+      }
+    });
+
+    return () => {
+      active = false;
+      if (sub?.subscription) sub.subscription.unsubscribe();
+    };
+  }, []);
+  
+  // DO NOT TOUCH: Data sync triggers
   useEffect(() => {
     if (currentUser?.is_approved) {
       refreshAll({ keepHood: false })
       if (currentUser.is_admin) refreshApprovals()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, currentUser?.is_approved])
 
   useEffect(() => {
     if (currentUser?.is_approved) refreshBookingsOnly()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewWeekOffset, selectedHood?.id, weekStart?.getTime(), cycleStart?.getTime()])
 
+  // ---------- Handlers (keep logic) ----------
   const handleLogin = async (e) => {
-    e.preventDefault();
-    if (isLoggingIn) return; // Evita clics dobles
-    
-    setIsLoggingIn(true); // Bloqueamos el botón visualmente
-    try {
-      const email = loginData.email.trim().toLowerCase();
-      const password = loginData.password;
+    e.preventDefault()
+    if (isLoggingIn) return
 
-      // Usamos el timeout para que no se quede trabado 30 segundos
+    setIsLoggingIn(true)
+    try {
+      const email = loginData.email.trim().toLowerCase()
+      const password = loginData.password
+
       const res = await withTimeout(
         supabase.auth.signInWithPassword({ email, password }),
         8000,
         'login_timeout'
-      );
+      )
 
-      if (res.error) throw res.error;
+      if (res.error) throw res.error
 
-      const profile = await loadProfileForAuthUser(res.data.user);
-      if (!profile) throw new Error('No profile found');
+      const profile = await loadProfileForAuthUser(res.data.user)
+      if (!profile) throw new Error('No profile found')
 
-      setCurrentUser(profile);
+      setCurrentUser(profile)
     } catch (err) {
-      console.error("Error de login:", err);
-      alert("Error al entrar: Revisa tu correo/contraseña o la conexión.");
+      console.error('Error de login:', err)
+      alert('Error al entrar: Revisa tu correo/contraseña o la conexión.')
     } finally {
-      setIsLoggingIn(false); // IMPORTANTE: Esto libera el botón siempre
+      setIsLoggingIn(false)
     }
-  };
+  }
 
   const handleRegister = async (e) => {
     e.preventDefault()
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email: regData.email.trim().toLowerCase(),
       password: regData.password,
-      options: { data: { full_name: regData.name, user_code: (regData.code || '').toUpperCase() } }
+      options: { data: { full_name: regData.name, user_code: (regData.code || '').toUpperCase() } },
     })
     if (error) return alert(error.message)
     setShowRegModal(false)
-    alert('Registro enviado para aprobación.')
+    alert('Registro creado. Tu acceso queda pendiente de aprobación por soporte.')
+  }
+
+  const handlePasswordReset = async (e) => {
+    e.preventDefault()
+    const email = resetEmail.trim().toLowerCase()
+    if (!email) return
+    const { error } = await supabase.auth.resetPasswordForEmail(email)
+    if (error) return alert('No pude enviar el correo de restablecimiento.')
+    setShowResetModal(false)
+    alert('Listo. Revisa tu correo para restablecer contraseña.')
   }
 
   const handleBooking = async (day, hour) => {
     if (!currentUser?.is_approved) return
     if (isWeekLocked(viewWeekOffset)) return alert(formatReleaseMessage(releaseTime))
     if (bookingBusy) return
+
     setBookingBusy(true)
     try {
       const targetDate = setHours(addDays(weekStart, day), hour)
+
       // Restricción 3 horas seguidas
-      const dayHours = bookings.filter(b => b.user_id === currentUser.id && isSameDay(parseISO(b.start_time), targetDate)).map(b => parseISO(b.start_time).getHours())
+      const dayHours = bookings
+        .filter((b) => b.user_id === currentUser.id && isSameDay(parseISO(b.start_time), targetDate))
+        .map((b) => parseISO(b.start_time).getHours())
+
       const allSorted = [...dayHours, hour].sort((a, b) => a - b)
-      let max = 1, curr = 1
+      let max = 1,
+        curr = 1
       for (let i = 0; i < allSorted.length - 1; i++) {
-        if (allSorted[i + 1] === allSorted[i] + 1) curr++; else curr = 1
+        if (allSorted[i + 1] === allSorted[i] + 1) curr++
+        else curr = 1
         max = Math.max(curr, max)
       }
       if (max > 3) return alert('Límite GPR: Máximo 3 horas consecutivas.')
-      const { error } = await supabase.rpc('book_slot', { p_hood_id: selectedHood.id, p_start_time: targetDate.toISOString() })
-      if (error) alert(error.message); else refreshBookingsOnly()
-    } finally { if (mountedRef.current) setBookingBusy(false) }
+
+      const { error } = await supabase.rpc('book_slot', {
+        p_hood_id: selectedHood.id,
+        p_start_time: targetDate.toISOString(),
+      })
+
+      if (error) alert(error.message)
+      else refreshBookingsOnly()
+    } finally {
+      if (mountedRef.current) setBookingBusy(false)
+    }
   }
 
   const saveNotes = async () => {
     setSavingNotes(true)
-    const { error } = await supabase.rpc('update_booking_notes', { p_booking_id: selectedBooking.id, p_notes: tempNotes })
-    if (!error) { setSelectedBooking(null); refreshBookingsOnly(); }
+    const { error } = await supabase.rpc('update_booking_notes', {
+      p_booking_id: selectedBooking.id,
+      p_notes: tempNotes,
+    })
+    if (!error) {
+      setSelectedBooking(null)
+      refreshBookingsOnly()
+    }
     setSavingNotes(false)
   }
 
   const deleteBooking = async () => {
     if (!window.confirm('¿Borrar reserva?')) return
     const { error } = await supabase.rpc('cancel_booking', { p_booking_id: selectedBooking.id })
-    if (!error) { setSelectedBooking(null); refreshBookingsOnly(); }
+    if (!error) {
+      setSelectedBooking(null)
+      refreshBookingsOnly()
+    }
   }
 
   const approveProfile = async (id) => {
@@ -344,48 +424,210 @@ export default function App() {
     if (!error) refreshApprovals()
   }
 
+  // ---------- UI blocks ----------
+  const SupportBox = () => (
+    <div className="p-6 bg-slate-900 rounded-[2rem] text-white shadow-xl border border-slate-800">
+      <div className="flex items-center gap-2 text-blue-300 mb-4">
+        <LifeBuoy size={18} />
+        <span className="text-[10px] font-black uppercase tracking-widest">Soporte Técnico</span>
+      </div>
+      <p className="text-sm font-bold mb-1">{ADMIN_CONFIG.name}</p>
+      <a
+        href={`mailto:${ADMIN_CONFIG.email}`}
+        className="text-[10px] text-blue-300 hover:underline block mb-4"
+      >
+        {ADMIN_CONFIG.email}
+      </a>
+      <p className="text-[9px] text-slate-400 leading-relaxed border-t border-white/10 pt-4 italic">
+        Si necesitas aprobación de cuenta o reportar una falla, contacta directamente a soporte.
+      </p>
+    </div>
+  )
+
+  const iosInput =
+    'w-full px-6 py-4 bg-slate-50 rounded-2xl outline-none text-sm ring-1 ring-slate-100 focus:ring-2 focus:ring-blue-500'
+
+  // ---------- Views ----------
   if (!authReady) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white p-10 rounded-[3rem] shadow-2xl text-center">
-          <ShieldCheck size={48} className="mx-auto text-blue-600 mb-6" />
-          <h1 className="text-2xl font-black text-slate-900">Cargando…</h1>
+        <div className="w-full max-w-sm bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 text-center">
+          <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6">
+            <ShieldCheck size={32} />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter">Cargando…</h1>
+          <p className="text-xs text-slate-400 mt-2">Inicializando sesión y sincronización</p>
         </div>
       </div>
     )
   }
 
+  // ---------- Login ----------
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white p-10 rounded-[3rem] shadow-2xl text-center">
-          <ShieldCheck size={48} className="mx-auto text-blue-600 mb-6" />
-          <h1 className="text-4xl font-black text-slate-900 mb-1">CellBlock</h1>
-          <p className="text-blue-600 font-bold text-[10px] uppercase tracking-widest mb-8">HostCell Suite</p>
-          <form onSubmit={handleLogin} className="space-y-3">
-            <input required type="email" placeholder="email@ibt.unam.mx" className="w-full px-6 py-4 bg-slate-50 rounded-2xl outline-none" onChange={e => setLoginData({...loginData, email: e.target.value})} />
-            <input required type="password" placeholder="Contraseña" className="w-full px-6 py-4 bg-slate-50 rounded-2xl outline-none" onChange={e => setLoginData({...loginData, password: e.target.value})} />
-            <button 
-              disabled={isLoggingIn}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition-all disabled:opacity-50"
-            >
-              {isLoggingIn ? "Conectando..." : "Entrar al Lab"}
-            </button>
-          </form>
-          <button onClick={() => setShowRegModal(true)} className="mt-6 text-xs font-bold text-blue-600 underline">Solicitar Acceso</button>
+        <div className="w-full max-w-sm">
+          <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 text-center">
+            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6">
+              <ShieldCheck size={32} />
+            </div>
+
+            <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-1">CellBlock</h1>
+            <p className="text-blue-600 font-bold text-[10px] uppercase tracking-widest mb-6">
+              HostCell Suite
+            </p>
+
+            <form onSubmit={handleLogin} className="space-y-3">
+              <input
+                required
+                type="email"
+                placeholder="email@ibt.unam.mx"
+                className={iosInput}
+                value={loginData.email}
+                onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+              />
+              <input
+                required
+                type="password"
+                placeholder="Contraseña"
+                className={iosInput}
+                value={loginData.password}
+                onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+              />
+              <button
+                disabled={isLoggingIn}
+                className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition-all disabled:opacity-50"
+              >
+                {isLoggingIn ? 'Conectando...' : 'Entrar al Lab'}
+              </button>
+            </form>
+
+            <div className="mt-5 flex items-center justify-between text-xs">
+              <button
+                onClick={() => setShowRegModal(true)}
+                className="font-bold text-blue-600 hover:underline"
+              >
+                Solicitar Acceso
+              </button>
+              <button
+                onClick={() => {
+                  setResetEmail(loginData.email || '')
+                  setShowResetModal(true)
+                }}
+                className="font-bold text-slate-500 hover:underline inline-flex items-center gap-1"
+              >
+                <KeyRound size={14} /> Restablecer
+              </button>
+            </div>
+
+            <div className="mt-6">
+              <SupportBox />
+            </div>
+          </div>
         </div>
+
+        {/* REGISTER MODAL */}
         {showRegModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-            <div className="bg-white p-10 rounded-[3rem] w-full max-w-md relative">
-              <button onClick={() => setShowRegModal(false)} className="absolute top-8 right-8 text-slate-300"><X /></button>
-              <h2 className="text-2xl font-black mb-6">Registro GPR</h2>
+            <div className="bg-white p-10 rounded-[3rem] w-full max-w-md relative shadow-2xl border border-slate-100">
+              <button
+                onClick={() => setShowRegModal(false)}
+                className="absolute top-8 right-8 text-slate-300 hover:text-slate-500"
+                title="Cerrar"
+              >
+                <X />
+              </button>
+
+              <h2 className="text-2xl font-black mb-2">Registro GPR</h2>
+              <p className="text-xs text-slate-500 mb-6">
+                Al crear tu cuenta, tu acceso queda <span className="font-bold">pendiente de aprobación</span>.
+                Si urge, contacta soporte.
+              </p>
+
               <form onSubmit={handleRegister} className="space-y-4">
-                <input required placeholder="Nombre completo" className="w-full px-5 py-3.5 bg-slate-50 rounded-xl" onChange={e => setRegData({...regData, name: e.target.value})} />
-                <input required type="email" placeholder="email@ibt.unam.mx" className="w-full px-5 py-3.5 bg-slate-50 rounded-xl" onChange={e => setRegData({...regData, email: e.target.value})} />
-                <input required placeholder="Código (3 letras)" maxLength={3} className="w-full px-5 py-3.5 bg-slate-50 rounded-xl uppercase font-bold" onChange={e => setRegData({...regData, code: e.target.value})} />
-                <input required type="password" placeholder="Contraseña" className="w-full px-5 py-3.5 bg-slate-50 rounded-xl" onChange={e => setRegData({...regData, password: e.target.value})} />
-                <button type="submit" className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg">Registrar</button>
+                <input
+                  required
+                  placeholder="Nombre completo"
+                  className={iosInput}
+                  value={regData.name}
+                  onChange={(e) => setRegData({ ...regData, name: e.target.value })}
+                />
+                <input
+                  required
+                  type="email"
+                  placeholder="email@ibt.unam.mx"
+                  className={iosInput}
+                  value={regData.email}
+                  onChange={(e) => setRegData({ ...regData, email: e.target.value })}
+                />
+                <input
+                  required
+                  placeholder="Código (3 letras)"
+                  maxLength={3}
+                  className={`${iosInput} uppercase font-black tracking-widest`}
+                  value={regData.code}
+                  onChange={(e) => setRegData({ ...regData, code: e.target.value })}
+                />
+                <input
+                  required
+                  type="password"
+                  placeholder="Contraseña"
+                  className={iosInput}
+                  value={regData.password}
+                  onChange={(e) => setRegData({ ...regData, password: e.target.value })}
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 hover:brightness-95 transition"
+                >
+                  Registrar
+                </button>
               </form>
+
+              <div className="mt-6">
+                <SupportBox />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RESET MODAL */}
+        {showResetModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="bg-white p-10 rounded-[3rem] w-full max-w-md relative shadow-2xl border border-slate-100">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="absolute top-8 right-8 text-slate-300 hover:text-slate-500"
+                title="Cerrar"
+              >
+                <X />
+              </button>
+
+              <h2 className="text-2xl font-black mb-2">Restablecer contraseña</h2>
+              <p className="text-xs text-slate-500 mb-6">
+                Si tu correo “ya existe” pero no recuerdas la contraseña, usa este flujo.
+              </p>
+
+              <form onSubmit={handlePasswordReset} className="space-y-4">
+                <input
+                  required
+                  type="email"
+                  placeholder="email@ibt.unam.mx"
+                  className={iosInput}
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl inline-flex items-center justify-center gap-2 hover:bg-black transition"
+                >
+                  <KeyRound size={18} /> Enviar correo
+                </button>
+              </form>
+
+              <div className="mt-6">
+                <SupportBox />
+              </div>
             </div>
           </div>
         )}
@@ -393,104 +635,246 @@ export default function App() {
     )
   }
 
+  // ---------- Pending approval ----------
   if (currentUser && !currentUser.is_approved) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white p-10 rounded-[3rem] shadow-2xl text-center">
-          <ShieldCheck size={48} className="mx-auto text-blue-600 mb-6" />
-          <h1 className="text-2xl font-black text-slate-900 mb-2">Acceso Pendiente</h1>
-          <p className="text-sm text-slate-500 mb-8">Tu cuenta está en espera de aprobación por el administrador.</p>
-          <button onClick={signOut} className="text-red-500 font-bold text-xs uppercase tracking-widest">Cerrar Sesión</button>
+        <div className="w-full max-w-md bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100">
+          <div className="flex items-center justify-between mb-6">
+            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white">
+              <ShieldCheck size={32} />
+            </div>
+            <button
+              onClick={signOut}
+              className="p-2 text-red-400 hover:text-red-600"
+              title="Salir"
+            >
+              <LogOut size={20} />
+            </button>
+          </div>
+
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black uppercase tracking-widest mb-4">
+            Pendiente de aprobación
+          </div>
+
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter mb-2">
+            Acceso pendiente de aprobación
+          </h1>
+          <p className="text-sm text-slate-600 mb-6">
+            Tu cuenta existe, pero todavía no está aprobada para ver y reservar equipos.
+          </p>
+
+          <div className="mb-6 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+            <p className="text-[10px] uppercase tracking-widest font-black text-slate-400 mb-2">
+              Tu registro
+            </p>
+            <p className="text-sm font-bold text-slate-900">{currentUser.full_name || 'Sin nombre'}</p>
+            <p className="text-xs text-slate-500">{currentUser.email || 'Sin email'}</p>
+            <p className="text-xs text-slate-500">Código: {currentUser.user_code || '—'}</p>
+          </div>
+
+          <SupportBox />
         </div>
       </div>
     )
   }
 
+  // ---------- Approved app ----------
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 overflow-x-hidden">
-      {/* HEADER REFINADO: No cursiva, text-5xl, bordes opacos */}
-      <nav className="bg-white border-b border-slate-300 px-6 md:px-10 py-8 flex justify-between items-center sticky top-0 z-40">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-5xl font-black tracking-tighter text-slate-900">CellBlock</h1>
-          <p className="text-sm font-bold text-blue-600">Host Cell Lab Suite – Practical tools for high-performance biotechnology.</p>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Grupo Palomares-Ramirez | Instituto de Biotecnología UNAM</p>
-        </div>
+      <nav className="bg-white border-b border-slate-200 px-6 md:px-10 py-6 flex justify-between items-center sticky top-0 z-40">
         <div className="flex items-center gap-4">
-          <button onClick={() => setShowPwaModal(true)} className="p-2 text-slate-300 hover:text-blue-600"><Smartphone size={24} /></button>
-          <button onClick={signOut} className="p-2 text-red-400 hover:text-red-600"><LogOut size={24} /></button>
+          <div className="bg-blue-600 p-2.5 rounded-2xl text-white shadow-lg shadow-blue-100">
+            <ShieldCheck size={22} />
+          </div>
+          <div className="leading-tight">
+            <h1 className="text-xl font-black tracking-tighter">CellBlock</h1>
+            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">
+              Host Cell Lab Suite – Practical tools for high-performance biotechnology.
+            </p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+              Grupo Palomares-Ramirez | Instituto de Biotecnología UNAM
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowPwaModal(true)}
+            className="p-2 text-slate-300 hover:text-blue-600 transition-colors"
+            title="Instalar (PWA)"
+          >
+            <Smartphone size={20} />
+          </button>
+          <button onClick={signOut} className="p-2 text-red-400 hover:text-red-600" title="Salir">
+            <LogOut size={20} />
+          </button>
         </div>
       </nav>
 
       <div className="max-w-[1600px] mx-auto px-6 md:px-10 mt-8 grid grid-cols-12 gap-8 pb-20">
-        <aside className="col-span-12 lg:col-span-2 space-y-6">
-          <div className="flex lg:flex-col gap-2 overflow-x-auto pb-4 scrollbar-hide">
-            {hoods.map(h => (
-              <button key={h.id} onClick={() => setSelectedHood(h)} className={`w-full text-left px-5 py-4 rounded-2xl transition-all border ${selectedHood?.id === h.id ? 'bg-blue-600 text-white shadow-lg border-blue-400' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}>
-                <div className="text-xs font-black uppercase tracking-tighter">{h.name}</div>
-                <div className="text-[10px] mt-1 font-bold flex justify-between uppercase opacity-80">
-                  <span>Lab {h.lab_room || '—'}</span>
-                  <span className={selectedHood?.id === h.id ? 'text-blue-200' : 'text-blue-600'}>{formatHoodUse(h.biosafety_use)}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-          {currentUser.is_admin && (
-            <div className="p-6 bg-white rounded-[2rem] shadow-xl border border-slate-300">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Aprobaciones</p>
-              <div className="space-y-3">
-                {pendingProfiles.map(p => (
-                  <div key={p.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                    <p className="text-xs font-bold text-slate-900 truncate">{p.full_name}</p>
-                    <button onClick={() => approveProfile(p.id)} className="mt-2 w-full bg-blue-600 text-white font-bold py-2 rounded-xl text-[10px]">Aprobar</button>
+        {/* SIDEBAR */}
+        <aside className="col-span-12 lg:col-span-2 space-y-6 flex flex-col">
+          <div className="flex lg:flex-col gap-2 overflow-x-auto pb-4 lg:pb-0 scrollbar-hide">
+            {hoods.map((h) => {
+              const meta = getHoodMeta(h)
+              const active = selectedHood?.id === h.id
+
+              return (
+                <button
+                  key={h.id}
+                  onClick={() => setSelectedHood(h)}
+                  className={`w-full text-left px-5 py-4 rounded-2xl transition-all border ${
+                    active
+                      ? 'bg-blue-600 text-white shadow-lg border-blue-400'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="text-xs font-black uppercase tracking-tighter">{h.name}</div>
+
+                  <div className="text-[10px] mt-1 font-bold flex justify-between uppercase opacity-90">
+                    <span>{meta.lab}</span>
+                    <span className={active ? 'text-blue-200' : 'text-blue-600'}>{meta.useLabel}</span>
                   </div>
-                ))}
+                </button>
+              )
+            })}
+          </div>
+
+          {currentUser.is_admin && (
+            <div className="p-6 bg-white rounded-[2rem] shadow-xl border border-slate-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Aprobaciones
+                </p>
+                <button
+                  onClick={refreshApprovals}
+                  className="text-[10px] font-black text-blue-600 hover:underline"
+                  disabled={loadingApprovals}
+                >
+                  {loadingApprovals ? 'Cargando…' : 'Refrescar'}
+                </button>
               </div>
+
+              {pendingProfiles.length === 0 ? (
+                <p className="text-xs text-slate-500">No hay usuarios pendientes.</p>
+              ) : (
+                <div className="space-y-3">
+                  {pendingProfiles.map((p) => (
+                    <div key={p.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {p.full_name || 'Sin nombre'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 truncate">{p.email || 'Sin email'}</p>
+                      <p className="text-[11px] text-slate-500">Código: {p.user_code || '—'}</p>
+                      <button
+                        onClick={() => approveProfile(p.id)}
+                        className="mt-2 w-full bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs"
+                      >
+                        Aprobar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
+
+          <div className="hidden lg:block mt-auto">
+            <SupportBox />
+          </div>
         </aside>
 
+        {/* MAIN */}
         <main className="col-span-12 lg:col-span-10 space-y-6">
-          <div className="flex overflow-x-auto gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-300 scrollbar-hide">
-            {[0, 1, 2, 3].map(offset => (
-              <button key={offset} onClick={() => setViewWeekOffset(offset)} className={`flex-1 min-w-[100px] py-3 text-[10px] font-black rounded-xl transition-all ${viewWeekOffset === offset ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>
+          <div className="flex overflow-x-auto gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200 scrollbar-hide">
+            {[0, 1, 2, 3].map((offset) => (
+              <button
+                key={offset}
+                onClick={() => setViewWeekOffset(offset)}
+                className={`flex-1 min-w-[100px] py-3 text-[10px] font-black rounded-xl transition-all ${
+                  viewWeekOffset === offset ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'
+                }`}
+              >
                 SEMANA {offset + 1} {isWeekLocked(offset) ? '🔒' : ''}
               </button>
             ))}
           </div>
 
-          <div className="bg-white rounded-[3rem] border border-slate-300 shadow-2xl overflow-hidden relative">
+          <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl overflow-hidden relative">
             <div className="overflow-x-auto">
-              {/* TABLA: Bordes border-slate-300 y Horas text-slate-500 */}
               <table className="w-full border-collapse table-fixed min-w-[800px]">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-300">
-                    <th className="w-20 p-5 text-[10px] font-black text-slate-500 uppercase sticky left-0 bg-slate-50 z-20">Hora</th>
+                  <tr className="bg-slate-50/60 border-b border-slate-200">
+                    <th className="w-20 p-5 text-[10px] font-black text-slate-500 uppercase sticky left-0 bg-slate-50/90 backdrop-blur-md z-20 border-r border-slate-200">
+                      Hora
+                    </th>
                     {DAYS_NAME.map((d, i) => (
-                      <th key={d} className="p-5 text-[11px] font-black border-l border-slate-300 uppercase text-slate-700">
-                        {d} <span className="block text-[9px] text-slate-400 font-normal mt-1">{format(addDays(weekStart, i), 'dd/MM')}</span>
+                      <th
+                        key={d}
+                        className="p-5 text-[11px] font-black border-l border-slate-200 uppercase text-slate-700"
+                      >
+                        {d}
+                        <span className="block text-[9px] text-slate-400 font-normal mt-1">
+                          {format(addDays(weekStart, i), 'dd/MM')}
+                        </span>
                       </th>
                     ))}
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-slate-200">
-                  {HOURS.map(hour => (
+                  {HOURS.map((hour) => (
                     <tr key={hour}>
-                      <td className="p-4 text-[10px] font-black text-slate-500 text-center sticky left-0 bg-white z-20 border-r border-slate-300">{hour}:00</td>
-                      {[0,1,2,3,4,5,6].map(day => {
+                      <td className="p-4 text-[10px] font-black text-slate-500 text-center sticky left-0 bg-white/95 backdrop-blur-md z-20 border-r border-slate-200">
+                        {hour}:00
+                      </td>
+
+                      {[0, 1, 2, 3, 4, 5, 6].map((day) => {
                         const slotDate = setHours(addDays(weekStart, day), hour)
                         const booking = bookingMap.get(`${selectedHood?.id}|${slotDate.getTime()}`)
                         const isMine = booking?.user_id === currentUser.id
+                        const hasNote = Boolean((booking?.notes || '').trim())
+
                         return (
-                          <td key={day} className="border-l border-slate-300 h-16 p-1.5 relative">
+                          <td key={day} className="border-l border-slate-200 h-16 p-1.5 relative">
                             {booking ? (
-                              <button onClick={() => {setSelectedBooking(booking); setTempNotes(booking.notes || '')}} className={`h-full w-full rounded-2xl p-3 flex flex-col justify-center transition-all border text-left ${isMine ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                              <button
+                                onClick={() => {
+                                  setSelectedBooking(booking)
+                                  setTempNotes(booking.notes || '')
+                                }}
+                                className={`h-full w-full rounded-2xl p-3 flex flex-col justify-center transition-all border text-left ${
+                                  isMine
+                                    ? 'bg-blue-600 border-blue-400 text-white shadow-lg'
+                                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                                }`}
+                              >
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[10px] font-black uppercase tracking-tighter truncate">{booking.user_name}</span>
-                                  {booking.notes && <MessageSquare size={14} className={isMine ? 'text-blue-200' : 'text-blue-500'} />}
+                                  <span className="text-[10px] font-black uppercase tracking-tighter truncate">
+                                    {booking.user_name}
+                                  </span>
+
+                                  {/* Notes badge (amber like before) */}
+                                  {hasNote && (
+                                    <span
+                                      className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-[10px] font-black ${
+                                        isMine ? 'bg-amber-400/20 text-amber-200' : 'bg-amber-500/15 text-amber-600'
+                                      }`}
+                                      title="Esta reserva tiene notas"
+                                    >
+                                      <MessageSquare size={14} />
+                                    </span>
+                                  )}
                                 </div>
                               </button>
                             ) : (
-                              <button disabled={isWeekLocked(viewWeekOffset) || bookingBusy} onClick={() => handleBooking(day, hour)} className="w-full h-full rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-300 transition-all flex items-center justify-center opacity-40 hover:opacity-100 disabled:opacity-5">
+                              <button
+                                disabled={isWeekLocked(viewWeekOffset) || bookingBusy || loadingData}
+                                onClick={() => handleBooking(day, hour)}
+                                className="w-full h-full rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-300 transition-all flex items-center justify-center opacity-40 hover:opacity-100 disabled:opacity-20"
+                                title={isWeekLocked(viewWeekOffset) ? 'Bloqueado' : 'Reservar'}
+                              >
                                 <Plus size={18} className="text-slate-300" />
                               </button>
                             )}
@@ -503,27 +887,89 @@ export default function App() {
               </table>
             </div>
           </div>
+
+          <div className="lg:hidden mt-10">
+            <SupportBox />
+          </div>
         </main>
       </div>
 
-      {/* MODAL DETALLES */}
+      {/* PWA MODAL */}
+      {showPwaModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-6">
+          <div className="bg-white p-10 rounded-[3rem] w-full max-w-md shadow-2xl relative border border-slate-100">
+            <button
+              onClick={() => setShowPwaModal(false)}
+              className="absolute top-8 right-8 text-slate-300 hover:text-slate-500"
+            >
+              <X />
+            </button>
+            <h3 className="text-2xl font-black mb-3 flex items-center gap-2">
+              <Smartphone size={20} /> Instalar
+            </h3>
+            <p className="text-sm text-slate-600 mb-6">
+              En Chrome: menú ⋮ → “Instalar app”. En iOS Safari: compartir → “Add to Home Screen”.
+            </p>
+            <button
+              onClick={() => setShowPwaModal(false)}
+              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition"
+            >
+              Ok
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* BOOKING DETAILS / NOTES MODAL */}
       {selectedBooking && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-6">
-          <div className="bg-white p-10 rounded-[3rem] w-full max-w-sm shadow-2xl relative">
-            <button onClick={() => setSelectedBooking(null)} className="absolute top-8 right-8 text-slate-300"><X/></button>
+          <div className="bg-white p-10 rounded-[3rem] w-full max-w-sm shadow-2xl relative border border-slate-100">
+            <button
+              onClick={() => setSelectedBooking(null)}
+              className="absolute top-8 right-8 text-slate-300 hover:text-slate-500"
+            >
+              <X />
+            </button>
+
             <h3 className="text-2xl font-black mb-1">Reserva</h3>
-            <p className="text-xs text-slate-500 mb-6">{selectedHood?.name} · {format(new Date(selectedBooking.start_time), 'dd/MM HH:mm')}</p>
-            <textarea 
-              disabled={!(currentUser.is_admin || selectedBooking.user_id === currentUser.id)}
-              value={tempNotes} onChange={e => setTempNotes(e.target.value)}
-              className="w-full p-5 bg-slate-50 rounded-2xl text-sm min-h-[150px] outline-none mb-6" placeholder="Notas..." 
-            />
-            <div className="flex gap-2">
+            <p className="text-xs text-slate-500 mb-6">
+              {selectedHood?.name} · {format(new Date(selectedBooking.start_time), 'dd/MM HH:mm')}
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">
+                  Notas / Observaciones
+                </p>
+                <textarea
+                  disabled={!(currentUser.is_admin || selectedBooking.user_id === currentUser.id)}
+                  value={tempNotes}
+                  onChange={(e) => setTempNotes(e.target.value)}
+                  className="w-full p-5 bg-slate-50 rounded-2xl text-sm min-h-[150px] outline-none ring-1 ring-slate-100 focus:ring-2 focus:ring-blue-500"
+                  placeholder="Ej: usaré solo 30 min / material de cuidado / limpieza especial / etc."
+                />
+                <p className="text-[10px] text-slate-400 mt-2">
+                  Estas notas son visibles para todos los usuarios aprobados.
+                </p>
+              </div>
+
               {(currentUser.is_admin || selectedBooking.user_id === currentUser.id) && (
-                <>
-                  <button onClick={saveNotes} className="flex-1 bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-100"><Save size={18}/> Guardar</button>
-                  <button onClick={deleteBooking} className="bg-red-50 text-red-600 font-bold px-6 py-4 rounded-2xl"><Trash2 size={20}/></button>
-                </>
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveNotes}
+                    disabled={savingNotes}
+                    className="flex-1 bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-100 disabled:opacity-50"
+                  >
+                    <Save size={18} /> {savingNotes ? 'Guardando…' : 'Guardar'}
+                  </button>
+                  <button
+                    onClick={deleteBooking}
+                    className="bg-red-50 text-red-600 font-bold px-6 py-4 rounded-2xl hover:bg-red-100 transition"
+                    title="Borrar"
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </div>
               )}
             </div>
           </div>
