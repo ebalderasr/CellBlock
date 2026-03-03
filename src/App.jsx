@@ -17,20 +17,26 @@ import {
   X,
   Trash2,
   LogOut,
-  Smartphone,
   LifeBuoy,
   Save,
   MessageSquare,
   KeyRound,
+  RefreshCcw,
+  CheckCircle2,
+  Send,
+  UserCheck,
 } from 'lucide-react'
 
 /**
- * CellBlock v5.5 - Estabilidad y Lógica GPR
+ * CellBlock v5.5 - UI iOS restore + Admin tools
+ * IMPORTANT: Mantiene la lógica de inicio simplificada (Anti-Chrome Hang).
  */
 
 const ADMIN_CONFIG = {
   name: 'Emiliano Balderas',
   email: 'emiliano.balderas@ibt.unam.mx',
+  footer: 'Grupo Palomares-Ramirez | Instituto de Biotecnología UNAM',
+  tagline: 'Host Cell Lab Suite – Practical tools for high-performance biotechnology.',
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
@@ -38,14 +44,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   throw new Error('Missing Supabase env vars: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
 }
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-})
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const DAYS_NAME = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM']
@@ -96,10 +95,10 @@ function formatReleaseMessage(releaseTime) {
   return `Los horarios de esas semanas se liberan el sábado ${format(releaseTime, 'dd/MM')} a las 11:00 AM.`
 }
 
-function withTimeout(promise, ms, label = 'timeout') {
+function withTimeout(promise, ms) {
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(label)), ms)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ])
 }
 
@@ -112,6 +111,7 @@ export default function App() {
     }
   }, [])
 
+  // ---------- State ----------
   const [authReady, setAuthReady] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
@@ -121,8 +121,6 @@ export default function App() {
   const [showResetModal, setShowResetModal] = useState(false)
   const [regData, setRegData] = useState({ name: '', email: '', code: '', password: '' })
   const [resetEmail, setResetEmail] = useState('')
-
-  const [showPwaModal, setShowPwaModal] = useState(false)
 
   const [hoods, setHoods] = useState([])
   const [selectedHood, setSelectedHood] = useState(null)
@@ -138,13 +136,17 @@ export default function App() {
   const [pendingProfiles, setPendingProfiles] = useState([])
   const [loadingApprovals, setLoadingApprovals] = useState(false)
 
-  const [nowTick, setNowTick] = useState(() => new Date())
+  // Admin: password reset tool
+  const [adminResetEmail, setAdminResetEmail] = useState('')
+  const [adminResetBusy, setAdminResetBusy] = useState(false)
 
+  const [nowTick, setNowTick] = useState(() => new Date())
   useEffect(() => {
     const id = setInterval(() => setNowTick(new Date()), 60 * 1000)
     return () => clearInterval(id)
   }, [])
 
+  // ---------- Calendar computations ----------
   const cycleStart = useMemo(() => getCycleStart(nowTick), [nowTick])
   const releaseTime = useMemo(() => getReleaseTimeForCycle(cycleStart), [cycleStart])
   const weekStart = useMemo(
@@ -168,201 +170,120 @@ export default function App() {
     return m
   }, [bookings])
 
-  const signOut = async () => {
-    await supabase.auth.signOut()
-    if (mountedRef.current) {
-      setCurrentUser(null)
-      setBookings([])
-      setHoods([])
-      setSelectedHood(null)
+  // ---------- Auth init (KEEP: simplified anti-Chrome hang) ----------
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const { data: { session } } = await withTimeout(supabase.auth.getSession(), 4000)
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single()
+          if (mountedRef.current && profile) setCurrentUser({ ...profile, id: session.user.id })
+        }
+      } catch (e) {
+        console.warn('Auth init problem')
+      } finally {
+        if (mountedRef.current) setAuthReady(true)
+      }
     }
-  }
+    init()
+  }, [])
 
+  // ---------- Data helpers ----------
   const loadProfileForAuthUser = async (authUser) => {
     if (!authUser?.id) return null
     const { data, error } = await supabase.from('profiles').select('*').eq('id', authUser.id).single()
     return error ? null : { ...data, id: authUser.id }
   }
 
-  const fetchHoods = async () => {
-    const { data, error } = await supabase.from('hoods').select('*').order('name')
-    return error ? [] : data || []
-  }
-
-  const fetchBookingsForWeekAndHood = async (hoodId, start, end) => {
-    if (!hoodId) return []
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('hood_id', hoodId)
-      .gte('start_time', start.toISOString())
-      .lt('start_time', end.toISOString())
-    return error ? [] : data || []
-  }
-
   const refreshApprovals = async () => {
     if (!currentUser?.is_admin) return
     setLoadingApprovals(true)
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('profiles')
         .select('*')
         .eq('is_approved', false)
         .order('created_at', { ascending: true })
-      if (!error && mountedRef.current) setPendingProfiles(data || [])
+      if (mountedRef.current) setPendingProfiles(data || [])
     } finally {
       if (mountedRef.current) setLoadingApprovals(false)
     }
   }
 
-  const refreshAll = async ({ keepHood = true } = {}) => {
+  const refreshBookingsOnly = async () => {
+    if (!currentUser?.is_approved || !selectedHood?.id) return
+    const { data } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('hood_id', selectedHood.id)
+      .gte('start_time', weekStart.toISOString())
+      .lt('start_time', weekEnd.toISOString())
+    if (mountedRef.current) setBookings(data || [])
+  }
+
+  const refreshAll = async () => {
     if (!currentUser?.is_approved) return
     setLoadingData(true)
     try {
-      const h = await fetchHoods()
+      const { data: hoodsData } = await supabase.from('hoods').select('*').order('name')
       if (!mountedRef.current) return
+      const h = hoodsData || []
       setHoods(h)
-
-      let hood = selectedHood
-      if (!keepHood || !hood) hood = h?.[0] || null
-      setSelectedHood(hood)
-
-      if (hood?.id) {
-        const b = await fetchBookingsForWeekAndHood(hood.id, weekStart, weekEnd)
-        if (mountedRef.current) setBookings(b)
-      }
+      if (h.length && !selectedHood) setSelectedHood(h[0])
+      if (currentUser.is_admin) await refreshApprovals()
     } finally {
       if (mountedRef.current) setLoadingData(false)
     }
   }
 
-  const refreshBookingsOnly = async () => {
-    if (!currentUser?.is_approved || !selectedHood?.id) return
-    const b = await fetchBookingsForWeekAndHood(selectedHood.id, weekStart, weekEnd)
-    if (mountedRef.current) setBookings(b)
-  }
-
-  // DO NOT TOUCH: Auth init / sensors
-useEffect(() => {
-  let cancelled = false
-
-  const safeLocalSignOut = async () => {
-    try {
-      // IMPORTANTÍSIMO: no bloquear el arranque esperando red
-      // scope: 'local' evita invalidar “global” y suele ser más robusto
-      await withTimeout(supabase.auth.signOut({ scope: 'local' }), 2500, 'signout_timeout')
-    } catch (e) {
-      // Si falla, no pasa nada: lo importante es liberar la UI
-      console.warn('safeLocalSignOut:', e)
-    }
-  }
-
-  const init = async () => {
-    try {
-      // getSession es local-first; aun así lo acotamos
-      const { data: { session }, error } = await withTimeout(
-        supabase.auth.getSession(),
-        5000,
-        'auth_timeout'
-      )
-
-      if (error) throw error
-
-      if (session?.user) {
-        const profile = await withTimeout(loadProfileForAuthUser(session.user), 5000, 'profile_timeout')
-        if (!cancelled && mountedRef.current) setCurrentUser(profile || null)
-      }
-    } catch (e) {
-      console.warn('Auth init problem:', e)
-      // NO bloquees el finally con signOut global
-      void safeLocalSignOut()
-      if (!cancelled && mountedRef.current) setCurrentUser(null)
-    } finally {
-      if (!cancelled && mountedRef.current) setAuthReady(true)
-    }
-  }
-
-  init()
-
-  const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-    try {
-      if (event === 'SIGNED_OUT') {
-        if (!cancelled && mountedRef.current) {
-          setCurrentUser(null)
-          setBookings([])
-          setHoods([])
-        }
-        return
-      }
-
-      if (session?.user) {
-        const profile = await withTimeout(loadProfileForAuthUser(session.user), 5000, 'profile_timeout')
-        if (!cancelled && mountedRef.current) setCurrentUser(profile || null)
-      }
-    } catch (e) {
-      console.warn('onAuthStateChange problem:', e)
-      // Si algo raro pasa en Chrome, soltamos UI sin colgar
-      void safeLocalSignOut()
-      if (!cancelled && mountedRef.current) setCurrentUser(null)
-    }
-  })
-
-  return () => {
-    cancelled = true
-    if (sub?.subscription) sub.subscription.unsubscribe()
-  }
-}, [])
-
-  // DO NOT TOUCH: Data sync triggers
   useEffect(() => {
-    if (currentUser?.is_approved) {
-      refreshAll({ keepHood: false })
-      if (currentUser.is_admin) refreshApprovals()
-    }
+    if (currentUser?.is_approved) refreshAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, currentUser?.is_approved])
 
   useEffect(() => {
-    if (currentUser?.is_approved) refreshBookingsOnly()
+    refreshBookingsOnly()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewWeekOffset, selectedHood?.id, weekStart?.getTime(), cycleStart?.getTime()])
+  }, [viewWeekOffset, selectedHood?.id, weekStart?.getTime()])
 
-  // ---------- Handlers (keep logic) ----------
+  // ---------- Auth handlers ----------
   const handleLogin = async (e) => {
     e.preventDefault()
     if (isLoggingIn) return
-
     setIsLoggingIn(true)
     try {
       const email = loginData.email.trim().toLowerCase()
       const password = loginData.password
 
-      const res = await withTimeout(
-        supabase.auth.signInWithPassword({ email, password }),
-        8000,
-        'login_timeout'
-      )
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) throw error
 
-      if (res.error) throw res.error
-
-      const profile = await loadProfileForAuthUser(res.data.user)
-      if (!profile) throw new Error('No profile found')
-
-      setCurrentUser(profile)
-    } catch (err) {
-      console.error('Error de login:', err)
-      alert('Error al entrar: Revisa tu correo/contraseña o la conexión.')
+      const profile = await loadProfileForAuthUser(data.user)
+      if (profile) setCurrentUser(profile)
+      else alert('Tu cuenta existe, pero no encuentro profile.')
+    } catch (_err) {
+      alert('Error de acceso. Revisa tus datos.')
     } finally {
-      setIsLoggingIn(false)
+      if (mountedRef.current) setIsLoggingIn(false)
     }
   }
 
   const handleRegister = async (e) => {
     e.preventDefault()
+    const email = regData.email.trim().toLowerCase()
     const { error } = await supabase.auth.signUp({
-      email: regData.email.trim().toLowerCase(),
+      email,
       password: regData.password,
-      options: { data: { full_name: regData.name, user_code: (regData.code || '').toUpperCase() } },
+      options: {
+        data: {
+          full_name: regData.name,
+          user_code: (regData.code || '').toUpperCase(),
+        },
+      },
     })
     if (error) return alert(error.message)
     setShowRegModal(false)
@@ -379,10 +300,16 @@ useEffect(() => {
     alert('Listo. Revisa tu correo para restablecer contraseña.')
   }
 
+  const signOut = async () => {
+    await supabase.auth.signOut()
+    // Mantengo tu enfoque “estable”: recarga para limpiar estado en todos los browsers.
+    window.location.reload()
+  }
+
+  // ---------- Booking handlers ----------
   const handleBooking = async (day, hour) => {
-    if (!currentUser?.is_approved) return
+    if (!currentUser?.is_approved || bookingBusy) return
     if (isWeekLocked(viewWeekOffset)) return alert(formatReleaseMessage(releaseTime))
-    if (bookingBusy) return
 
     setBookingBusy(true)
     try {
@@ -394,8 +321,8 @@ useEffect(() => {
         .map((b) => parseISO(b.start_time).getHours())
 
       const allSorted = [...dayHours, hour].sort((a, b) => a - b)
-      let max = 1,
-        curr = 1
+      let max = 1
+      let curr = 1
       for (let i = 0; i < allSorted.length - 1; i++) {
         if (allSorted[i + 1] === allSorted[i] + 1) curr++
         else curr = 1
@@ -437,14 +364,33 @@ useEffect(() => {
     }
   }
 
+  // ---------- Admin: Approve users ----------
   const approveProfile = async (id) => {
+    if (!currentUser?.is_admin) return
     const { error } = await supabase.from('profiles').update({ is_approved: true }).eq('id', id)
-    if (!error) refreshApprovals()
+    if (error) return alert('No pude aprobar. Revisa policies.')
+    await refreshApprovals()
   }
 
-  // ---------- UI blocks ----------
-  const SupportBox = () => (
-    <div className="p-6 bg-slate-900 rounded-[2rem] text-white shadow-xl border border-slate-800">
+  // ---------- Admin: Send reset email (from within session) ----------
+  const adminSendReset = async () => {
+    if (!currentUser?.is_admin) return
+    const email = adminResetEmail.trim().toLowerCase()
+    if (!email) return
+    setAdminResetBusy(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email)
+      if (error) return alert('No pude enviar el reset (rate limit o configuración).')
+      alert('Listo: envié correo de restablecimiento.')
+      setAdminResetEmail('')
+    } finally {
+      setAdminResetBusy(false)
+    }
+  }
+
+  // ---------- UI components ----------
+  const SupportBox = ({ compact = false } = {}) => (
+    <div className={`p-6 bg-slate-900 rounded-[2rem] text-white shadow-xl border border-slate-800 ${compact ? 'p-5' : ''}`}>
       <div className="flex items-center gap-2 text-blue-300 mb-4">
         <LifeBuoy size={18} />
         <span className="text-[10px] font-black uppercase tracking-widest">Soporte Técnico</span>
@@ -456,21 +402,37 @@ useEffect(() => {
       >
         {ADMIN_CONFIG.email}
       </a>
-      <p className="text-[9px] text-slate-400 leading-relaxed border-t border-white/10 pt-4 italic">
-        Si necesitas aprobación de cuenta o reportar una falla, contacta directamente a soporte.
-      </p>
+      {!compact && (
+        <p className="text-[9px] text-slate-400 leading-relaxed border-t border-white/10 pt-4 italic">
+          Si necesitas aprobación de cuenta o reportar una falla, contacta directamente a soporte.
+        </p>
+      )}
     </div>
   )
 
   const iosInput =
     'w-full px-6 py-4 bg-slate-50 rounded-2xl outline-none text-sm ring-1 ring-slate-100 focus:ring-2 focus:ring-blue-500'
 
+  const Pill = ({ children, tone = 'slate' }) => {
+    const tones = {
+      slate: 'bg-slate-100 text-slate-700',
+      blue: 'bg-blue-50 text-blue-700',
+      amber: 'bg-amber-50 text-amber-800',
+      red: 'bg-red-50 text-red-700',
+    }
+    return (
+      <span className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${tones[tone] || tones.slate}`}>
+        {children}
+      </span>
+    )
+  }
+
   // ---------- Views ----------
   if (!authReady) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
         <div className="w-full max-w-sm bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 text-center">
-          <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6">
+          <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6 shadow-lg shadow-blue-100">
             <ShieldCheck size={32} />
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tighter">Cargando…</h1>
@@ -483,17 +445,16 @@ useEffect(() => {
   // ---------- Login ----------
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
         <div className="w-full max-w-sm">
           <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 text-center">
-            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6">
+            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6 shadow-lg shadow-blue-100">
               <ShieldCheck size={32} />
             </div>
 
             <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-1">CellBlock</h1>
-            <p className="text-blue-600 font-bold text-[10px] uppercase tracking-widest mb-6">
-              HostCell Suite
-            </p>
+            <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2">HostCell Suite</p>
+            <p className="text-[11px] text-slate-500 mb-8">{ADMIN_CONFIG.tagline}</p>
 
             <form onSubmit={handleLogin} className="space-y-3">
               <input
@@ -516,7 +477,7 @@ useEffect(() => {
                 disabled={isLoggingIn}
                 className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition-all disabled:opacity-50"
               >
-                {isLoggingIn ? 'Conectando...' : 'Entrar al Lab'}
+                {isLoggingIn ? 'Conectando…' : 'Entrar al Lab'}
               </button>
             </form>
 
@@ -556,10 +517,16 @@ useEffect(() => {
                 <X />
               </button>
 
-              <h2 className="text-2xl font-black mb-2">Registro GPR</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-2xl font-black">Registro GPR</h2>
+                <Pill tone="amber">
+                  <UserCheck size={14} /> requiere aprobación
+                </Pill>
+              </div>
+
               <p className="text-xs text-slate-500 mb-6">
-                Al crear tu cuenta, tu acceso queda <span className="font-bold">pendiente de aprobación</span>.
-                Si urge, contacta soporte.
+                Al crear tu cuenta, tu acceso queda <span className="font-bold">pendiente de aprobación</span>. Si urge,
+                contacta soporte.
               </p>
 
               <form onSubmit={handleRegister} className="space-y-4">
@@ -594,6 +561,7 @@ useEffect(() => {
                   value={regData.password}
                   onChange={(e) => setRegData({ ...regData, password: e.target.value })}
                 />
+
                 <button
                   type="submit"
                   className="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-100 hover:brightness-95 transition"
@@ -623,7 +591,7 @@ useEffect(() => {
 
               <h2 className="text-2xl font-black mb-2">Restablecer contraseña</h2>
               <p className="text-xs text-slate-500 mb-6">
-                Si tu correo “ya existe” pero no recuerdas la contraseña, usa este flujo.
+                Enviaremos un correo con un link para cambiar tu contraseña.
               </p>
 
               <form onSubmit={handlePasswordReset} className="space-y-4">
@@ -656,26 +624,22 @@ useEffect(() => {
   // ---------- Pending approval ----------
   if (currentUser && !currentUser.is_approved) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
         <div className="w-full max-w-md bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100">
           <div className="flex items-center justify-between mb-6">
-            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white">
+            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white shadow-lg shadow-blue-100">
               <ShieldCheck size={32} />
             </div>
-            <button
-              onClick={signOut}
-              className="p-2 text-red-400 hover:text-red-600"
-              title="Salir"
-            >
+            <button onClick={signOut} className="p-2 text-red-400 hover:text-red-600" title="Salir">
               <LogOut size={20} />
             </button>
           </div>
 
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black uppercase tracking-widest mb-4">
-            Pendiente de aprobación
-          </div>
+          <Pill tone="amber">
+            <UserCheck size={14} /> Pendiente de aprobación
+          </Pill>
 
-          <h1 className="text-2xl font-black text-slate-900 tracking-tighter mb-2">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tighter mt-4 mb-2">
             Acceso pendiente de aprobación
           </h1>
           <p className="text-sm text-slate-600 mb-6">
@@ -683,9 +647,7 @@ useEffect(() => {
           </p>
 
           <div className="mb-6 p-4 rounded-2xl bg-slate-50 border border-slate-100">
-            <p className="text-[10px] uppercase tracking-widest font-black text-slate-400 mb-2">
-              Tu registro
-            </p>
+            <p className="text-[10px] uppercase tracking-widest font-black text-slate-400 mb-2">Tu registro</p>
             <p className="text-sm font-bold text-slate-900">{currentUser.full_name || 'Sin nombre'}</p>
             <p className="text-xs text-slate-500">{currentUser.email || 'Sin email'}</p>
             <p className="text-xs text-slate-500">Código: {currentUser.user_code || '—'}</p>
@@ -708,26 +670,17 @@ useEffect(() => {
           <div className="leading-tight">
             <h1 className="text-xl font-black tracking-tighter">CellBlock</h1>
             <p className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">
-              Host Cell Lab Suite – Practical tools for high-performance biotechnology.
+              {ADMIN_CONFIG.tagline}
             </p>
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-              Grupo Palomares-Ramirez | Instituto de Biotecnología UNAM
+              {ADMIN_CONFIG.footer}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setShowPwaModal(true)}
-            className="p-2 text-slate-300 hover:text-blue-600 transition-colors"
-            title="Instalar (PWA)"
-          >
-            <Smartphone size={20} />
-          </button>
-          <button onClick={signOut} className="p-2 text-red-400 hover:text-red-600" title="Salir">
-            <LogOut size={20} />
-          </button>
-        </div>
+        <button onClick={signOut} className="p-2 text-red-400 hover:text-red-600" title="Salir">
+          <LogOut size={20} />
+        </button>
       </nav>
 
       <div className="max-w-[1600px] mx-auto px-6 md:px-10 mt-8 grid grid-cols-12 gap-8 pb-20">
@@ -745,11 +698,10 @@ useEffect(() => {
                   className={`w-full text-left px-5 py-4 rounded-2xl transition-all border ${
                     active
                       ? 'bg-blue-600 text-white shadow-lg border-blue-400'
-                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
                   <div className="text-xs font-black uppercase tracking-tighter">{h.name}</div>
-
                   <div className="text-[10px] mt-1 font-bold flex justify-between uppercase opacity-90">
                     <span>{meta.lab}</span>
                     <span className={active ? 'text-blue-200' : 'text-blue-600'}>{meta.useLabel}</span>
@@ -759,42 +711,75 @@ useEffect(() => {
             })}
           </div>
 
+          {/* ADMIN PANEL */}
           {currentUser.is_admin && (
-            <div className="p-6 bg-white rounded-[2rem] shadow-xl border border-slate-100">
-              <div className="flex items-center justify-between mb-3">
+            <div className="p-6 bg-white rounded-[2rem] shadow-xl border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  Aprobaciones
+                  Admin
                 </p>
                 <button
                   onClick={refreshApprovals}
-                  className="text-[10px] font-black text-blue-600 hover:underline"
+                  className="text-[10px] font-black text-blue-600 hover:underline inline-flex items-center gap-1"
                   disabled={loadingApprovals}
+                  title="Refrescar"
                 >
-                  {loadingApprovals ? 'Cargando…' : 'Refrescar'}
+                  <RefreshCcw size={14} /> {loadingApprovals ? '...' : 'Refrescar'}
                 </button>
               </div>
 
-              {pendingProfiles.length === 0 ? (
-                <p className="text-xs text-slate-500">No hay usuarios pendientes.</p>
-              ) : (
-                <div className="space-y-3">
-                  {pendingProfiles.map((p) => (
-                    <div key={p.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                      <p className="text-xs font-bold text-slate-900 truncate">
-                        {p.full_name || 'Sin nombre'}
-                      </p>
-                      <p className="text-[11px] text-slate-500 truncate">{p.email || 'Sin email'}</p>
-                      <p className="text-[11px] text-slate-500">Código: {p.user_code || '—'}</p>
-                      <button
-                        onClick={() => approveProfile(p.id)}
-                        className="mt-2 w-full bg-blue-600 text-white font-bold py-2.5 rounded-xl text-xs"
-                      >
-                        Aprobar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Aprobaciones
+                </p>
+
+                {pendingProfiles.length === 0 ? (
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 text-xs text-slate-500">
+                    No hay usuarios pendientes.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {pendingProfiles.map((p) => (
+                      <div key={p.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                        <p className="text-xs font-bold text-slate-900 truncate">
+                          {p.full_name || 'Sin nombre'}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">{p.email || 'Sin email'}</p>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => approveProfile(p.id)}
+                            className="flex-1 bg-blue-600 text-white font-bold py-2.5 rounded-xl text-[11px] inline-flex items-center justify-center gap-2"
+                          >
+                            <CheckCircle2 size={16} /> Aprobar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  Reset de contraseña
+                </p>
+                <input
+                  className={iosInput}
+                  placeholder="email@ibt.unam.mx"
+                  value={adminResetEmail}
+                  onChange={(e) => setAdminResetEmail(e.target.value)}
+                />
+                <button
+                  onClick={adminSendReset}
+                  disabled={adminResetBusy}
+                  className="w-full bg-slate-900 text-white font-bold py-3 rounded-2xl inline-flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-black transition"
+                >
+                  <Send size={16} /> {adminResetBusy ? 'Enviando…' : 'Enviar correo de reset'}
+                </button>
+                <p className="text-[10px] text-slate-500">
+                  Esto envía el correo estándar de Supabase. Puede haber rate limit.
+                </p>
+              </div>
             </div>
           )}
 
@@ -810,7 +795,7 @@ useEffect(() => {
               <button
                 key={offset}
                 onClick={() => setViewWeekOffset(offset)}
-                className={`flex-1 min-w-[100px] py-3 text-[10px] font-black rounded-xl transition-all ${
+                className={`flex-1 min-w-[110px] py-3 text-[10px] font-black rounded-xl transition-all ${
                   viewWeekOffset === offset ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'
                 }`}
               >
@@ -821,7 +806,7 @@ useEffect(() => {
 
           <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl overflow-hidden relative">
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse table-fixed min-w-[800px]">
+              <table className="w-full border-collapse table-fixed min-w-[820px]">
                 <thead>
                   <tr className="bg-slate-50/60 border-b border-slate-200">
                     <th className="w-20 p-5 text-[10px] font-black text-slate-500 uppercase sticky left-0 bg-slate-50/90 backdrop-blur-md z-20 border-r border-slate-200">
@@ -855,7 +840,7 @@ useEffect(() => {
                         const hasNote = Boolean((booking?.notes || '').trim())
 
                         return (
-                          <td key={day} className="border-l border-slate-200 h-16 p-1.5 relative">
+                          <td key={day} className="border-l border-slate-200 h-16 p-1.5">
                             {booking ? (
                               <button
                                 onClick={() => {
@@ -873,11 +858,12 @@ useEffect(() => {
                                     {booking.user_name}
                                   </span>
 
-                                  {/* Notes badge (amber like before) */}
                                   {hasNote && (
                                     <span
                                       className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-[10px] font-black ${
-                                        isMine ? 'bg-amber-400/20 text-amber-200' : 'bg-amber-500/15 text-amber-600'
+                                        isMine
+                                          ? 'bg-amber-400/20 text-amber-200'
+                                          : 'bg-amber-500/15 text-amber-700'
                                       }`}
                                       title="Esta reserva tiene notas"
                                     >
@@ -912,32 +898,6 @@ useEffect(() => {
         </main>
       </div>
 
-      {/* PWA MODAL */}
-      {showPwaModal && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-6">
-          <div className="bg-white p-10 rounded-[3rem] w-full max-w-md shadow-2xl relative border border-slate-100">
-            <button
-              onClick={() => setShowPwaModal(false)}
-              className="absolute top-8 right-8 text-slate-300 hover:text-slate-500"
-            >
-              <X />
-            </button>
-            <h3 className="text-2xl font-black mb-3 flex items-center gap-2">
-              <Smartphone size={20} /> Instalar
-            </h3>
-            <p className="text-sm text-slate-600 mb-6">
-              En Chrome: menú ⋮ → “Instalar app”. En iOS Safari: compartir → “Add to Home Screen”.
-            </p>
-            <button
-              onClick={() => setShowPwaModal(false)}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-black transition"
-            >
-              Ok
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* BOOKING DETAILS / NOTES MODAL */}
       {selectedBooking && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-6">
@@ -945,6 +905,7 @@ useEffect(() => {
             <button
               onClick={() => setSelectedBooking(null)}
               className="absolute top-8 right-8 text-slate-300 hover:text-slate-500"
+              title="Cerrar"
             >
               <X />
             </button>
@@ -956,9 +917,7 @@ useEffect(() => {
 
             <div className="space-y-4">
               <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">
-                  Notas / Observaciones
-                </p>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Notas / Observaciones</p>
                 <textarea
                   disabled={!(currentUser.is_admin || selectedBooking.user_id === currentUser.id)}
                   value={tempNotes}
@@ -966,9 +925,7 @@ useEffect(() => {
                   className="w-full p-5 bg-slate-50 rounded-2xl text-sm min-h-[150px] outline-none ring-1 ring-slate-100 focus:ring-2 focus:ring-blue-500"
                   placeholder="Ej: usaré solo 30 min / material de cuidado / limpieza especial / etc."
                 />
-                <p className="text-[10px] text-slate-400 mt-2">
-                  Estas notas son visibles para todos los usuarios aprobados.
-                </p>
+                <p className="text-[10px] text-slate-400 mt-2">Estas notas son visibles para todos los usuarios aprobados.</p>
               </div>
 
               {(currentUser.is_admin || selectedBooking.user_id === currentUser.id) && (
@@ -976,7 +933,7 @@ useEffect(() => {
                   <button
                     onClick={saveNotes}
                     disabled={savingNotes}
-                    className="flex-1 bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-100 disabled:opacity-50"
+                    className="flex-1 bg-blue-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-100 disabled:opacity-50 hover:brightness-95 transition"
                   >
                     <Save size={18} /> {savingNotes ? 'Guardando…' : 'Guardar'}
                   </button>
