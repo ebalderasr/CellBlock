@@ -131,15 +131,26 @@ This instance is configured for the **Palomares-Ramírez Group** at the Institut
 ```
 CellBlock/
 ├── src/
-│   ├── App.jsx          ← single-component application (auth, calendar, booking logic)
-│   ├── main.jsx         ← React entry point
-│   └── index.css        ← global styles
+│   ├── config/
+│   │   └── lab.config.js        ← lab identity, admin contact, booking rules
+│   ├── lib/
+│   │   └── supabase.js          ← Supabase client (single instance)
+│   ├── hooks/
+│   │   └── useBookings.js       ← data fetching + CRUD (hoods, bookings)
+│   ├── components/
+│   │   ├── BookingCalendar.jsx  ← 7-day × 24-hour scheduling grid
+│   │   ├── BookingModal.jsx     ← booking detail, notes, delete
+│   │   ├── LoginScreen.jsx      ← auth + registration flow
+│   │   └── SupportBox.jsx      ← admin contact panel
+│   ├── App.jsx                  ← thin orchestrator (auth state, slot logic)
+│   ├── main.jsx                 ← React entry point
+│   └── index.css                ← global styles
 ├── public/              ← static assets
 ├── screenshots/         ← UI screenshots for this README
 ├── index.html           ← HTML entry point
-├── vite.config.js       ← Vite configuration
+├── vite.config.js       ← Vite + GitHub Pages configuration
 ├── package.json
-└── .env                 ← Supabase credentials (not committed)
+└── .env                 ← Supabase credentials (not committed — see .env.example)
 ```
 
 ---
