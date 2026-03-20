@@ -437,6 +437,34 @@ const callAdminFn = async (action, payload = {}) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewWeekOffset, selectedHood?.id, weekStart?.getTime()])
 
+  // ── Realtime: sync bookings live across all sessions ──────────────────────
+  // When any user books or cancels, every connected client refreshes instantly
+  // without polling. Filtered per hood to minimise unnecessary traffic.
+  useEffect(() => {
+    if (!currentUser?.is_approved || !selectedHood?.id) return
+
+    const channel = supabase
+      .channel(`bookings-hood-${selectedHood.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookings',
+          filter: `hood_id=eq.${selectedHood.id}`,
+        },
+        () => {
+          refreshBookingsOnly()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHood?.id, currentUser?.is_approved])
+
   // ---------- Handlers ----------
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -545,8 +573,17 @@ const callAdminFn = async (action, payload = {}) => {
         p_start_time: targetDate.toISOString(),
       })
 
-      if (error) alert(error.message)
-      else refreshBookingsOnly()
+      if (error) {
+        const msg = error.message || ''
+        if (msg.includes('slot_taken')) {
+          alert('Este horario acaba de ser tomado por alguien más. La vista ya fue actualizada.')
+          refreshBookingsOnly()
+        } else {
+          alert(msg)
+        }
+      } else {
+        refreshBookingsOnly()
+      }
     } finally {
       if (mountedRef.current) setBookingBusy(false)
     }
