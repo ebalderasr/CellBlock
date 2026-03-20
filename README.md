@@ -1,102 +1,192 @@
+<div align="center">
+
 # CellBlock
 
-> **CellBlock** is a professional-grade scheduling engine designed to coordinate the use of critical equipment in biotechnology and research environments. As part of the **HostCell** suite, it provides a high-performance, real-time booking interface optimized for the lab bench.
+### Lab equipment scheduling for cell culture research groups
 
-<p align="center">
-<img src="[https://ebalderasr.github.io/CellBlock/icon-512.png](https://www.google.com/search?q=https://ebalderasr.github.io/CellBlock/icon-512.png)" width="180" alt="CellBlock Logo">
-</p>
+<br>
 
-<p align="center">
-<a href="[https://ebalderasr.github.io/CellBlock/](https://ebalderasr.github.io/CellBlock/)">
-<img src="[https://img.shields.io/badge/](https://img.shields.io/badge/)🚀_Launch_Live_App-CellBlock-2563eb?style=for-the-badge&labelColor=000000" alt="Launch CellBlock App">
-</a>
-</p>
+**[→ Open the live app](https://ebalderasr.github.io/CellBlock/)**
 
-<p align="center">
-<a href="[https://github.com/ebalderasr/CellBlock](https://github.com/ebalderasr/CellBlock)">Repo</a> •
-<a href="[https://ebalderasr.github.io/CellBlock/](https://ebalderasr.github.io/CellBlock/)">Live App</a>
-</p>
+<br>
+
+[![Stack](https://img.shields.io/badge/Stack-React_·_Supabase_·_Tailwind-4A90D9?style=for-the-badge)]()
+[![Focus](https://img.shields.io/badge/Focus-Biosafety_Cabinet_Scheduling-34C759?style=for-the-badge)]()
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
+[![Part of](https://img.shields.io/badge/Part_of-HostCell_Lab_Suite-5856D6?style=for-the-badge)](https://github.com/ebalderasr)
+
+</div>
 
 ---
 
-## A Flexible & Customizable Framework
+## What is CellBlock?
 
-**CellBlock** is built to be an adaptable solution that can be tailored to the specific operational needs of any research group:
+CellBlock is a **web-based scheduling system** for shared biosafety cabinet (hood) usage in a mammalian cell culture laboratory. It gives every lab member a live view of equipment availability, enforces fair-use rules automatically, and keeps experiment notes attached to each booking — all without spreadsheets or group chats.
 
-* **Unlimited Equipment Configuration**: Dynamically manage laminar flow hoods, bioreactors, microscopes, or any shared resource.
-* **Custom Usage Policies**: Define specific time limits, booking windows, and access permissions for different user levels.
-* **Adaptive Visuals**: The interface can be branded and adjusted to match the institutional identity of any laboratory.
-* **Automated Workflow Logic**: Features an intelligent "sliding window" system to manage future schedule releases automatically.
+It is built for research groups that share multiple hoods across rotating users and need a lightweight, always-available booking interface that runs from any device.
 
 ---
 
-## 📸 Application Interface
+## Why it matters
 
-### Desktop View
+Shared equipment in a cell culture lab is a constant source of scheduling conflicts. Without a system:
 
-Designed for comprehensive planning and administrative management.
+- Members have no visibility into who is using which hood and when
+- Back-to-back bookings monopolize equipment and block others
+- Experiment annotations get lost in notebooks or messaging apps
 
-<p align="center">
-<img src="screenshots/pc.png" alt="CellBlock Desktop Interface" width="100%">
-</p>
-
-### Mobile View
-
-Optimized for rapid booking and quick checks directly at the lab station.
-
-<p align="center">
-<img src="screenshots/mobil.jpeg" alt="CellBlock Mobile Interface" width="400">
-</p>
+CellBlock solves this with a real-time weekly calendar, per-hood views, and hard limits on consecutive booking blocks — enforced at the application level, not by convention.
 
 ---
 
-## 🔬 Implementation: Palomares-Ramírez Group (IBt-UNAM)
+## Screenshots
 
-This instance is specifically customized for **GPR-Lab** at the **Institute of Biotechnology, UNAM**, managing five specialized work stations with distinct biosafety requirements:
+**Desktop**
 
-* **Hood 1** ( Virus-free).
-* **Hood 2** ( Virus-free).
-* **Hood 3** ( Virus).
-* **Hood 4** ( Insect Cells).
-* **Bacteria Hood** (Lab 401 | Bacteria).
+![Desktop view](screenshots/pc.png)
 
----
+**Mobile**
 
-## ✅ Operational Logic & Rules
-
-To ensure fair equipment distribution and efficient lab flow, the following rules are implemented:
-
-### 1) The 3-Hour Limit
-
-* Users are restricted to a maximum of **3 consecutive hours** per equipment in a single day.
-* This prevents schedule saturation and ensures all group members have access to workspace.
-
-### 2) 4-Week Sliding Window
-
-The system operates on a rolling schedule with automated release triggers:
-
-* **Weeks 1 & 2**: Always open for standard planning and passaging.
-* **Weeks 3 & 4**: Locked for standard users and released automatically every **Saturday at 11:00 AM**.
-* **Rollover**: Every Monday at 00:00, the schedule shifts; former weeks 3 and 4 become weeks 1 and 2, and new weeks are generated.
+<img src="screenshots/mobil.jpeg" alt="Mobile view" width="360">
 
 ---
 
-## ⚡ Technical Features
+## How it works
 
-* **24/7 Scheduling**: Full grid support for night shifts and weekend monitoring.
-* **Experiment Notes**: Real-time communication via booking notes (e.g., "Media change only", "Cleaning required").
-* **PWA Ready**: Installable on Android, iOS, and PC as a standalone application.
-* **Secure Access**: Managed through institutional email or unique 3-letter codes for quick ID.
+### Authentication & access control
+
+Users register with their name, institutional email, and a 3-letter lab code. New accounts require **admin approval** before they can book. Login accepts either email or the 3-letter code.
+
+### Weekly calendar
+
+The main view is a 7-day × 24-hour grid — including nights and weekends, for cell culture runs that require off-hours monitoring. Each hood has its own independent schedule. Users can navigate up to 4 weeks ahead.
+
+### Fair-use rules enforced automatically
+
+| Rule | Details |
+|------|---------|
+| **Max 3 consecutive hours** | Per user, per hood, per day. Attempting a 4th consecutive slot is rejected |
+| **Rolling schedule release** | Weeks 3 and 4 are locked until the preceding Saturday at 11:00 AM, preventing early monopolization of future slots |
+| **Admin override** | Admin accounts bypass booking locks for urgent or administrative reservations |
+
+### Experiment notes
+
+Each booking has an attached notes field. Only the booking owner can write or edit notes. Notes are visible to any logged-in user when clicking a slot, supporting transparency across the team.
 
 ---
 
-## 🛠️ Technical Support
+## Features
 
-**CellBlock** is maintained by the lab's technical support:
-
-* **Admin/Support**: Emiliano Balderas.
-* **Contact**: [emiliano.balderas@ibt.unam.mx](mailto:emiliano.balderas@ibt.unam.mx).
+| | |
+|---|---|
+| **Real-time data** | Bookings sync through Supabase — changes appear immediately across all sessions |
+| **Multi-hood** | Any number of biosafety cabinets can be added; each has its own independent schedule |
+| **Role-based access** | Admin and regular user roles with different permissions |
+| **Approval workflow** | New registrations require admin approval before access is granted |
+| **Experiment notes** | Per-booking notes visible to the team, editable only by the owner |
+| **PWA-ready** | Installable on Android, iOS, and desktop as a standalone app |
+| **24/7 grid** | Full 24-hour view supports night shifts and weekend monitoring |
+| **Responsive** | Full sidebar layout on desktop; compact single-column view on mobile |
 
 ---
 
-**Host Cell Lab Suite** – *Practical tools for high-performance biotechnology.*
+## Implementation: GPR Lab (IBt-UNAM)
+
+This instance is configured for the **Palomares-Ramírez Group** at the Institute of Biotechnology, UNAM, managing five specialized stations:
+
+| Hood | Type |
+|------|------|
+| Hood 1 | Virus-free |
+| Hood 2 | Virus-free |
+| Hood 3 | Virus |
+| Hood 4 | Insect cells |
+| Bacteria Hood | Lab 401 · Bacteria |
+
+---
+
+## Tech stack
+
+**Frontend**
+
+![React](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
+![Lucide](https://img.shields.io/badge/Lucide_React-555555?style=flat-square)
+![date-fns](https://img.shields.io/badge/date--fns-770C56?style=flat-square)
+
+**Backend & data**
+
+![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+
+**Deployment**
+
+![GitHub Pages](https://img.shields.io/badge/GitHub_Pages-222222?style=flat-square&logo=github&logoColor=white)
+
+---
+
+## Project structure
+
+```
+CellBlock/
+├── src/
+│   ├── App.jsx          ← single-component application (auth, calendar, booking logic)
+│   ├── main.jsx         ← React entry point
+│   └── index.css        ← global styles
+├── public/              ← static assets
+├── screenshots/         ← UI screenshots for this README
+├── index.html           ← HTML entry point
+├── vite.config.js       ← Vite configuration
+├── package.json
+└── .env                 ← Supabase credentials (not committed)
+```
+
+---
+
+## Database schema (Supabase)
+
+| Table | Key columns |
+|-------|-------------|
+| `authorized_users` | `id`, `full_name`, `email`, `user_code`, `password`, `is_approved`, `is_admin` |
+| `hoods` | `id`, `name` |
+| `bookings` | `id`, `hood_id`, `user_id`, `user_name`, `start_time`, `end_time`, `notes` |
+
+---
+
+## Local setup
+
+```bash
+# 1. Clone and install
+git clone https://github.com/ebalderasr/CellBlock.git
+cd CellBlock
+npm install
+
+# 2. Configure Supabase credentials
+echo "VITE_SUPABASE_URL=https://your-project.supabase.co" >> .env
+echo "VITE_SUPABASE_ANON_KEY=your-anon-key" >> .env
+
+# 3. Start dev server
+npm run dev
+```
+
+### Deploy to GitHub Pages
+
+```bash
+npm run deploy
+```
+
+---
+
+## Author
+
+**Emiliano Balderas Ramírez**
+Bioengineer · PhD Candidate in Biochemical Sciences
+Instituto de Biotecnología (IBt), UNAM · Grupo Palomares-Ramírez
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-emilianobalderas-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/emilianobalderas/)
+[![Email](https://img.shields.io/badge/Email-ebalderas%40live.com.mx-D14836?style=flat-square&logo=gmail&logoColor=white)](mailto:ebalderas@live.com.mx)
+
+---
+
+<div align="center"><i>CellBlock — shared equipment, no conflicts.</i></div>
