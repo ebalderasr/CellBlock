@@ -1,10 +1,11 @@
 -- =============================================================================
--- CellBlock: allow extended bookings with optional notes
+-- CellBlock: allow extended bookings + allow booking the current hour
 -- Run once in the Supabase SQL Editor (Dashboard → SQL Editor → New query)
 -- =============================================================================
 -- Removes the hard 3-consecutive-hours block from book_slot().
 -- The limit is now a soft warning enforced only on the client (UI modal).
 -- Adds an optional p_notes parameter so the justification is saved atomically.
+-- Allows booking a slot that has already started (rejects only fully elapsed slots).
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION book_slot(
@@ -25,8 +26,9 @@ BEGIN
   -- Serialize all writes for the same hood.
   PERFORM pg_advisory_xact_lock(1, hashtext(p_hood_id::text));
 
-  -- ── Guard: reject past slots ──────────────────────────────────────────────
-  IF p_start_time < now() THEN
+  -- ── Guard: reject fully elapsed slots (allow booking the current hour) ──────
+  -- A slot that started at 11:00 ends at 12:00; if now() < 12:00 it's still valid.
+  IF p_start_time + interval '1 hour' <= now() THEN
     RAISE EXCEPTION 'past_slot'
       USING HINT = 'No puedes reservar un horario que ya pasó.';
   END IF;

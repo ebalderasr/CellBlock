@@ -5,6 +5,7 @@ import {
   startOfWeek,
   addWeeks,
   addDays,
+  addHours,
   isAfter,
   isBefore,
   setHours,
@@ -555,8 +556,8 @@ const callAdminFn = async (action, payload = {}) => {
     try {
       const targetDate = setHours(addDays(weekStart, day), hour)
 
-      // No permitir reservas en el pasado
-      if (isBefore(targetDate, new Date())) return alert('No puedes reservar un horario que ya pasó.')
+      // Bloquear solo si el slot ya terminó por completo (permite reservar la hora en curso)
+      if (isBefore(addHours(targetDate, 1), new Date())) return alert('No puedes reservar un horario que ya pasó.')
 
       // Advertencia de uso extenso (> 3 horas consecutivas)
       const dayHours = bookings
