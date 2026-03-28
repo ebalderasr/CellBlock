@@ -29,6 +29,7 @@ import {
   Shield,
   Edit3,
   Copy,
+  AlertTriangle,
 } from 'lucide-react'
 
 /**
@@ -167,6 +168,10 @@ export default function App() {
   const [tempNotes, setTempNotes] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
   const [bookingBusy, setBookingBusy] = useState(false)
+
+  // Extended booking warning modal (> 3 consecutive hours)
+  const [pendingExtendedBooking, setPendingExtendedBooking] = useState(null) // { day, hour }
+  const [extendedNotes, setExtendedNotes] = useState('')
 
   // Admin approvals + user management
   const [pendingProfiles, setPendingProfiles] = useState([])
@@ -553,7 +558,7 @@ const callAdminFn = async (action, payload = {}) => {
       // No permitir reservas en el pasado
       if (isBefore(targetDate, new Date())) return alert('No puedes reservar un horario que ya pasó.')
 
-      // Restricción 3 horas seguidas
+      // Advertencia de uso extenso (> 3 horas consecutivas)
       const dayHours = bookings
         .filter((b) => b.user_id === currentUser.id && isSameDay(parseISO(b.start_time), targetDate))
         .map((b) => parseISO(b.start_time).getHours())
@@ -566,13 +571,48 @@ const callAdminFn = async (action, payload = {}) => {
         else curr = 1
         max = Math.max(curr, max)
       }
-      if (max > 3) return alert('Límite GPR: Máximo 3 horas consecutivas.')
+
+      if (max > 3) {
+        // No bloquear — mostrar advertencia y pedir justificación obligatoria
+        setExtendedNotes('')
+        setPendingExtendedBooking({ day, hour })
+        return
+      }
 
       const { error } = await supabase.rpc('book_slot', {
         p_hood_id: selectedHood.id,
         p_start_time: targetDate.toISOString(),
       })
 
+      if (error) {
+        const msg = error.message || ''
+        if (msg.includes('slot_taken')) {
+          alert('Este horario acaba de ser tomado por alguien más. La vista ya fue actualizada.')
+          refreshBookingsOnly()
+        } else {
+          alert(msg)
+        }
+      } else {
+        refreshBookingsOnly()
+      }
+    } finally {
+      if (mountedRef.current) setBookingBusy(false)
+    }
+  }
+
+  const confirmExtendedBooking = async () => {
+    if (!extendedNotes.trim() || !pendingExtendedBooking) return
+    const { day, hour } = pendingExtendedBooking
+    setPendingExtendedBooking(null)
+
+    setBookingBusy(true)
+    try {
+      const targetDate = setHours(addDays(weekStart, day), hour)
+      const { error } = await supabase.rpc('book_slot', {
+        p_hood_id: selectedHood.id,
+        p_start_time: targetDate.toISOString(),
+        p_notes: extendedNotes.trim(),
+      })
       if (error) {
         const msg = error.message || ''
         if (msg.includes('slot_taken')) {
@@ -1433,6 +1473,64 @@ const callAdminFn = async (action, payload = {}) => {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXTENDED BOOKING WARNING MODAL */}
+      {pendingExtendedBooking && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-50 flex items-center justify-center p-6">
+          <div className="bg-white p-10 rounded-[3rem] w-full max-w-sm shadow-2xl relative border border-slate-100">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="flex items-center justify-center w-10 h-10 rounded-2xl bg-amber-100">
+                <AlertTriangle size={20} className="text-amber-500" />
+              </span>
+              <h3 className="text-2xl font-black">Reserva extensa</h3>
+            </div>
+
+            <p className="text-sm text-slate-600 mb-1 leading-relaxed">
+              Estás reservando <span className="font-bold">más de 3 horas consecutivas</span>.
+              Si de verdad lo necesitas, está bien — pero recuerda que el uso prolongado de la campana puede
+              retrasar el trabajo del resto del grupo.
+            </p>
+            <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              Sé responsable. Reserva solo el tiempo que realmente vas a usar.
+            </p>
+
+            <div className="space-y-5">
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">
+                  ¿Por qué necesitas tanto tiempo? <span className="text-red-400">*</span>
+                </p>
+                <textarea
+                  autoFocus
+                  value={extendedNotes}
+                  onChange={(e) => setExtendedNotes(e.target.value)}
+                  className="w-full p-5 bg-slate-50 rounded-2xl text-sm min-h-[120px] outline-none ring-1 ring-slate-100 focus:ring-2 focus:ring-amber-400"
+                  placeholder="Ej: experimento de transfección, requiero supervisar 5 h de incubación, limpieza a fondo después de virus…"
+                />
+                <p className="text-[10px] text-slate-400 mt-2">
+                  Este comentario quedará visible para todos los usuarios aprobados.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={confirmExtendedBooking}
+                  disabled={!extendedNotes.trim() || bookingBusy}
+                  className="flex-1 bg-amber-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-amber-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  <AlertTriangle size={16} />
+                  {bookingBusy ? 'Reservando…' : 'Confirmar reserva'}
+                </button>
+                <button
+                  onClick={() => setPendingExtendedBooking(null)}
+                  className="bg-slate-100 text-slate-600 font-bold px-6 py-4 rounded-2xl hover:bg-slate-200 transition"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           </div>
         </div>
