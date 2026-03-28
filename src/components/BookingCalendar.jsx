@@ -37,15 +37,18 @@ export default function BookingCalendar({
 
       {/* Calendar grid */}
       <div className="bg-white rounded-[3rem] border border-slate-100 shadow-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-auto max-h-[70svh]"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           <table className="w-full border-collapse table-fixed min-w-[800px]">
             <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100">
-                <th className="w-20 p-5 text-[10px] font-black text-slate-300 uppercase sticky left-0 bg-slate-50/80 backdrop-blur-md z-20">
+              <tr className="border-b border-slate-100">
+                <th className="w-20 p-5 text-[10px] font-black text-slate-300 uppercase sticky left-0 top-0 bg-slate-50 backdrop-blur-sm z-40">
                   Time
                 </th>
                 {DAYS.map((d, i) => (
-                  <th key={d} className="p-5 text-[11px] font-black border-l border-slate-100 uppercase text-slate-700">
+                  <th key={d} className="p-5 text-[11px] font-black border-l border-slate-100 uppercase text-slate-700 sticky top-0 bg-slate-50 backdrop-blur-sm z-30">
                     {d}
                     <span className="block text-[9px] text-slate-300 font-normal mt-1">
                       {format(addDays(weekStart, i), 'dd/MM')}
@@ -57,7 +60,7 @@ export default function BookingCalendar({
             <tbody className="divide-y divide-slate-50">
               {HOURS.map(hour => (
                 <tr key={hour}>
-                  <td className="p-4 text-[10px] font-black text-slate-200 text-center sticky left-0 bg-white/90 backdrop-blur-md z-20 border-r border-slate-50">
+                  <td className="p-4 text-[10px] font-black text-slate-200 text-center sticky left-0 bg-white z-20 border-r border-slate-50">
                     {hour}:00
                   </td>
                   {[0, 1, 2, 3, 4, 5, 6].map(day => {
