@@ -13,6 +13,7 @@ import {
   parseISO,
   isSameDay,
 } from 'date-fns'
+import { es } from 'date-fns/locale'
 import {
   ShieldCheck,
   Plus,
@@ -997,11 +998,11 @@ const callAdminFn = async (action, payload = {}) => {
           </div>
           <div className="leading-tight">
             <h1 className="text-xl font-black tracking-tighter">CellBlock</h1>
-            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-tight">
-              {ADMIN_CONFIG.subtitle}
+            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">
+              HostCell Suite
             </p>
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-              {ADMIN_CONFIG.footer}
+            <p className="text-[9px] text-slate-400 font-medium">
+              Grupo Palomares-Ramírez · Instituto de Biotecnología, UNAM
             </p>
           </div>
         </div>
@@ -1337,21 +1338,24 @@ const callAdminFn = async (action, payload = {}) => {
               </div>
 
               <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl overflow-hidden relative">
-                <div className="overflow-x-auto">
+                <div
+                  className="overflow-auto max-h-[70svh]"
+                  style={{ WebkitOverflowScrolling: 'touch' }}
+                >
                   <table className="w-full border-collapse table-fixed min-w-[800px]">
                     <thead>
-                      <tr className="bg-slate-50/60 border-b border-slate-200">
-                        <th className="w-20 p-5 text-[10px] font-black text-slate-500 uppercase sticky left-0 bg-slate-50/90 backdrop-blur-md z-20 border-r border-slate-200">
+                      <tr className="border-b border-slate-200">
+                        <th className="w-20 p-5 text-[10px] font-black text-slate-500 uppercase sticky left-0 top-0 bg-slate-50 z-40 border-r border-slate-200">
                           Hora
                         </th>
                         {DAYS_NAME.map((d, i) => (
                           <th
                             key={d}
-                            className="p-5 text-[11px] font-black border-l border-slate-200 uppercase text-slate-700"
+                            className="p-5 text-[11px] font-black border-l border-slate-200 uppercase text-slate-700 sticky top-0 bg-slate-50 z-30"
                           >
                             {d}
-                            <span className="block text-[9px] text-slate-400 font-normal mt-1">
-                              {format(addDays(weekStart, i), 'dd/MM')}
+                            <span className="block text-[11px] text-slate-600 font-bold mt-0.5">
+                              {format(addDays(weekStart, i), 'd MMM', { locale: es }).toUpperCase()}
                             </span>
                           </th>
                         ))}
@@ -1361,7 +1365,7 @@ const callAdminFn = async (action, payload = {}) => {
                     <tbody className="divide-y divide-slate-200">
                       {HOURS.map((hour) => (
                         <tr key={hour}>
-                          <td className="p-4 text-[10px] font-black text-slate-500 text-center sticky left-0 bg-white/95 backdrop-blur-md z-20 border-r border-slate-200">
+                          <td className="p-4 text-[10px] font-black text-slate-500 text-center sticky left-0 bg-white z-20 border-r border-slate-200">
                             {hour}:00
                           </td>
 
