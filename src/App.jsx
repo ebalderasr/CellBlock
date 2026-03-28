@@ -724,15 +724,23 @@ const callAdminFn = async (action, payload = {}) => {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
         <div className="w-full max-w-sm">
           <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100 text-center">
-            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-6">
+            <div className="inline-flex p-4 bg-blue-600 rounded-3xl text-white mb-5">
               <ShieldCheck size={32} />
             </div>
 
             <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-1">CellBlock</h1>
-            <p className="text-blue-600 font-bold text-[10px] uppercase tracking-widest mb-1">
+            <p className="text-blue-600 font-bold text-[10px] uppercase tracking-widest">
               HostCell Suite
             </p>
-            <p className="text-[10px] text-slate-400 font-bold mb-8">{ADMIN_CONFIG.subtitle}</p>
+
+            <div className="border-t border-slate-100 mt-5 pt-5 mb-8">
+              <p className="text-sm font-black text-slate-800 tracking-tight">
+                Grupo Palomares-Ramírez
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Instituto de Biotecnología · UNAM
+              </p>
+            </div>
 
             <form onSubmit={handleLogin} className="space-y-3">
               <input
