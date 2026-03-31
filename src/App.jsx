@@ -223,6 +223,104 @@ export default function App() {
     return m
   }, [bookings])
 
+  const isMissingBookSlotNotesSignature = (error) => {
+    const blob = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`
+    return blob.includes('Could not find the function public.book_slot') && blob.includes('schema cache')
+  }
+
+  const getConsecutiveBookingBlock = (bookingList, targetDate) => {
+    const oneHourMs = 60 * 60 * 1000
+    const sameDayMine = bookingList
+      .filter(
+        (b) =>
+          b.user_id === currentUser?.id &&
+          b.hood_id === selectedHood?.id &&
+          isSameDay(parseISO(b.start_time), targetDate)
+      )
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+
+    const byStart = new Map(sameDayMine.map((b) => [new Date(b.start_time).getTime(), b]))
+    const targetMs = targetDate.getTime()
+    if (!byStart.has(targetMs)) return []
+
+    const block = [byStart.get(targetMs)]
+    let cursor = targetMs - oneHourMs
+    while (byStart.has(cursor)) {
+      block.unshift(byStart.get(cursor))
+      cursor -= oneHourMs
+    }
+
+    cursor = targetMs + oneHourMs
+    while (byStart.has(cursor)) {
+      block.push(byStart.get(cursor))
+      cursor += oneHourMs
+    }
+
+    return block
+  }
+
+  const updateBookingNotesCompat = async (bookingIds, notes) => {
+    if (!bookingIds.length) return { error: null }
+
+    const { error: updateError } = await supabase.from('bookings').update({ notes }).in('id', bookingIds)
+    if (!updateError) return { error: null }
+
+    for (const bookingId of bookingIds) {
+      const { error } = await supabase.rpc('update_booking_notes', {
+        p_booking_id: bookingId,
+        p_notes: notes,
+      })
+      if (error) return { error }
+    }
+
+    return { error: null }
+  }
+
+  const applyNotesToConsecutiveBlock = async (targetDate, notes) => {
+    const normalizedNotes = notes.trim()
+    if (!normalizedNotes || !currentUser?.id || !selectedHood?.id) return { error: null }
+
+    const freshBookings = await fetchBookingsForWeekAndHood(selectedHood.id, weekStart, weekEnd)
+    const block = getConsecutiveBookingBlock(freshBookings, targetDate)
+    const bookingIds = block
+      .filter((booking) => (booking.notes || '').trim() !== normalizedNotes)
+      .map((booking) => booking.id)
+
+    const { error } = await updateBookingNotesCompat(bookingIds, normalizedNotes)
+    if (error) return { error }
+
+    const updatedBookings = freshBookings.map((booking) =>
+      bookingIds.includes(booking.id) ? { ...booking, notes: normalizedNotes } : booking
+    )
+
+    if (mountedRef.current) setBookings(updatedBookings)
+    return { error: null }
+  }
+
+  const bookSlotWithCompatibility = async (targetDate, notes = '') => {
+    const params = {
+      p_hood_id: selectedHood.id,
+      p_start_time: targetDate.toISOString(),
+    }
+    const normalizedNotes = notes.trim()
+
+    if (normalizedNotes) {
+      const { error } = await supabase.rpc('book_slot', {
+        ...params,
+        p_notes: normalizedNotes,
+      })
+
+      if (!error) return { error: null }
+      if (!isMissingBookSlotNotesSignature(error)) return { error }
+
+      const fallback = await supabase.rpc('book_slot', params)
+      return { error: fallback.error || null }
+    }
+
+    const { error } = await supabase.rpc('book_slot', params)
+    return { error: error || null }
+  }
+
   // ---------- Helpers ----------
   const signOut = async () => {
     await supabase.auth.signOut()
@@ -581,10 +679,7 @@ const callAdminFn = async (action, payload = {}) => {
         return
       }
 
-      const { error } = await supabase.rpc('book_slot', {
-        p_hood_id: selectedHood.id,
-        p_start_time: targetDate.toISOString(),
-      })
+      const { error } = await bookSlotWithCompatibility(targetDate)
 
       if (error) {
         const msg = error.message || ''
@@ -605,16 +700,12 @@ const callAdminFn = async (action, payload = {}) => {
   const confirmExtendedBooking = async () => {
     if (!extendedNotes.trim() || !pendingExtendedBooking) return
     const { day, hour } = pendingExtendedBooking
-    setPendingExtendedBooking(null)
 
     setBookingBusy(true)
     try {
       const targetDate = setHours(addDays(weekStart, day), hour)
-      const { error } = await supabase.rpc('book_slot', {
-        p_hood_id: selectedHood.id,
-        p_start_time: targetDate.toISOString(),
-        p_notes: extendedNotes.trim(),
-      })
+      const normalizedNotes = extendedNotes.trim()
+      const { error } = await bookSlotWithCompatibility(targetDate, normalizedNotes)
       if (error) {
         const msg = error.message || ''
         if (msg.includes('slot_taken')) {
@@ -624,7 +715,14 @@ const callAdminFn = async (action, payload = {}) => {
           alert(msg)
         }
       } else {
-        refreshBookingsOnly()
+        const { error: notesError } = await applyNotesToConsecutiveBlock(targetDate, normalizedNotes)
+        if (notesError) {
+          alert(notesError.message || 'La reserva se creó, pero no pude guardar la nota en todo el bloque.')
+          refreshBookingsOnly()
+        } else {
+          setPendingExtendedBooking(null)
+          setExtendedNotes('')
+        }
       }
     } finally {
       if (mountedRef.current) setBookingBusy(false)
