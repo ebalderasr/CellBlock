@@ -223,41 +223,106 @@ export default function App() {
     return m
   }, [bookings])
 
+  const getConsecutiveBlockFromEntries = (entries, targetTime) => {
+    const oneHourMs = 60 * 60 * 1000
+    const sorted = [...entries].sort((a, b) => a.time - b.time)
+    const targetIndex = sorted.findIndex((entry) => entry.time === targetTime)
+    if (targetIndex === -1) return []
+
+    const block = [sorted[targetIndex]]
+
+    let cursor = targetIndex - 1
+    while (cursor >= 0 && sorted[cursor + 1].time - sorted[cursor].time === oneHourMs) {
+      block.unshift(sorted[cursor])
+      cursor -= 1
+    }
+
+    cursor = targetIndex + 1
+    while (cursor < sorted.length && sorted[cursor].time - sorted[cursor - 1].time === oneHourMs) {
+      block.push(sorted[cursor])
+      cursor += 1
+    }
+
+    return block
+  }
+
+  const getExtendedBookingContext = (bookingList, targetDate) => {
+    const targetTime = targetDate.getTime()
+    const sameDayMine = bookingList.filter(
+      (b) =>
+        b.user_id === currentUser?.id &&
+        b.hood_id === selectedHood?.id &&
+        isSameDay(parseISO(b.start_time), targetDate)
+    )
+
+    const existingEntries = sameDayMine.map((booking) => ({
+      kind: 'booking',
+      booking,
+      time: new Date(booking.start_time).getTime(),
+      notes: (booking.notes || '').trim(),
+    }))
+
+    const hasTargetAlready = existingEntries.some((entry) => entry.time === targetTime)
+    const entries = hasTargetAlready
+      ? existingEntries
+      : [...existingEntries, { kind: 'target', booking: null, time: targetTime, notes: '' }]
+    const block = getConsecutiveBlockFromEntries(entries, targetTime)
+
+    return {
+      block,
+      blockLength: block.length,
+      inheritedNotes: block.find((entry) => entry.notes)?.notes || '',
+    }
+  }
+
   const isMissingBookSlotNotesSignature = (error) => {
     const blob = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`
     return blob.includes('Could not find the function public.book_slot') && blob.includes('schema cache')
   }
 
   const getConsecutiveBookingBlock = (bookingList, targetDate) => {
-    const oneHourMs = 60 * 60 * 1000
-    const sameDayMine = bookingList
-      .filter(
-        (b) =>
-          b.user_id === currentUser?.id &&
-          b.hood_id === selectedHood?.id &&
-          isSameDay(parseISO(b.start_time), targetDate)
-      )
-      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-
-    const byStart = new Map(sameDayMine.map((b) => [new Date(b.start_time).getTime(), b]))
-    const targetMs = targetDate.getTime()
-    if (!byStart.has(targetMs)) return []
-
-    const block = [byStart.get(targetMs)]
-    let cursor = targetMs - oneHourMs
-    while (byStart.has(cursor)) {
-      block.unshift(byStart.get(cursor))
-      cursor -= oneHourMs
-    }
-
-    cursor = targetMs + oneHourMs
-    while (byStart.has(cursor)) {
-      block.push(byStart.get(cursor))
-      cursor += oneHourMs
-    }
-
-    return block
+    return getExtendedBookingContext(bookingList, targetDate)
+      .block.filter((entry) => entry.booking)
+      .map((entry) => entry.booking)
   }
+
+  const extendedBookingIds = useMemo(() => {
+    const oneHourMs = 60 * 60 * 1000
+    const groups = new Map()
+
+    for (const booking of bookings) {
+      const key = [
+        booking.user_id,
+        booking.hood_id,
+        format(parseISO(booking.start_time), 'yyyy-MM-dd'),
+      ].join('|')
+
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push({
+        id: booking.id,
+        time: new Date(booking.start_time).getTime(),
+      })
+    }
+
+    const highlightedIds = new Set()
+    for (const entries of groups.values()) {
+      const sorted = entries.sort((a, b) => a.time - b.time)
+      let run = sorted.length ? [sorted[0]] : []
+
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].time - sorted[i - 1].time === oneHourMs) {
+          run.push(sorted[i])
+        } else {
+          if (run.length > 3) run.forEach((entry) => highlightedIds.add(entry.id))
+          run = [sorted[i]]
+        }
+      }
+
+      if (run.length > 3) run.forEach((entry) => highlightedIds.add(entry.id))
+    }
+
+    return highlightedIds
+  }, [bookings])
 
   const updateBookingNotesCompat = async (bookingIds, notes) => {
     if (!bookingIds.length) return { error: null }
@@ -658,22 +723,30 @@ const callAdminFn = async (action, payload = {}) => {
       // Bloquear solo si el slot ya terminó por completo (permite reservar la hora en curso)
       if (isBefore(addHours(targetDate, 1), new Date())) return alert('No puedes reservar un horario que ya pasó.')
 
-      // Advertencia de uso extenso (> 3 horas consecutivas)
-      const dayHours = bookings
-        .filter((b) => b.user_id === currentUser.id && isSameDay(parseISO(b.start_time), targetDate))
-        .map((b) => parseISO(b.start_time).getHours())
+      const extendedContext = getExtendedBookingContext(bookings, targetDate)
 
-      const allSorted = [...dayHours, hour].sort((a, b) => a - b)
-      let max = 1
-      let curr = 1
-      for (let i = 0; i < allSorted.length - 1; i++) {
-        if (allSorted[i + 1] === allSorted[i] + 1) curr++
-        else curr = 1
-        max = Math.max(curr, max)
-      }
+      if (extendedContext.blockLength > 3) {
+        if (extendedContext.inheritedNotes) {
+          const { error } = await bookSlotWithCompatibility(targetDate, extendedContext.inheritedNotes)
 
-      if (max > 3) {
-        // No bloquear — mostrar advertencia y pedir justificación obligatoria
+          if (error) {
+            const msg = error.message || ''
+            if (msg.includes('slot_taken')) {
+              alert('Este horario acaba de ser tomado por alguien más. La vista ya fue actualizada.')
+              refreshBookingsOnly()
+            } else {
+              alert(msg)
+            }
+          } else {
+            const { error: notesError } = await applyNotesToConsecutiveBlock(targetDate, extendedContext.inheritedNotes)
+            if (notesError) {
+              alert(notesError.message || 'La reserva se creó, pero no pude propagar la nota del bloque extenso.')
+              refreshBookingsOnly()
+            }
+          }
+          return
+        }
+
         setExtendedNotes('')
         setPendingExtendedBooking({ day, hour })
         return
@@ -1472,6 +1545,7 @@ const callAdminFn = async (action, payload = {}) => {
                             const booking = bookingMap.get(`${selectedHood?.id}|${slotDate.getTime()}`)
                             const isMine = booking?.user_id === currentUser.id
                             const hasNote = Boolean((booking?.notes || '').trim())
+                            const isExtendedBlock = booking ? extendedBookingIds.has(booking.id) : false
 
                             return (
                               <td key={day} className="border-l border-slate-200 h-16 p-1.5 relative">
@@ -1482,27 +1556,49 @@ const callAdminFn = async (action, payload = {}) => {
                                       setTempNotes(booking.notes || '')
                                     }}
                                     className={`h-full w-full rounded-2xl p-3 flex flex-col justify-center transition-all border text-left ${
-                                      isMine
-                                        ? 'bg-blue-600 border-blue-400 text-white shadow-lg'
-                                        : 'bg-slate-50 border-slate-200 text-slate-700'
+                                      isExtendedBlock
+                                        ? isMine
+                                          ? 'bg-amber-500 border-amber-400 text-white shadow-lg shadow-amber-100'
+                                          : 'bg-amber-100 border-amber-300 text-amber-900 shadow-sm'
+                                        : isMine
+                                          ? 'bg-blue-600 border-blue-400 text-white shadow-lg'
+                                          : 'bg-slate-50 border-slate-200 text-slate-700'
                                     }`}
                                   >
                                     <div className="flex items-center justify-between gap-2">
                                       <span className="text-[10px] font-black uppercase tracking-tighter truncate">
                                         {booking.user_name}
                                       </span>
-                                      {hasNote && (
-                                        <span
-                                          className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-[10px] font-black ${
-                                            isMine
-                                              ? 'bg-amber-400/20 text-amber-200'
-                                              : 'bg-amber-500/15 text-amber-600'
-                                          }`}
-                                          title="Esta reserva tiene notas"
-                                        >
-                                          <MessageSquare size={14} />
-                                        </span>
-                                      )}
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        {isExtendedBlock && (
+                                          <span
+                                            className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-[10px] font-black ${
+                                              isMine
+                                                ? 'bg-white/15 text-amber-100'
+                                                : 'bg-amber-200 text-amber-800'
+                                            }`}
+                                            title="Reserva extensa"
+                                          >
+                                            <AlertTriangle size={14} />
+                                          </span>
+                                        )}
+                                        {hasNote && (
+                                          <span
+                                            className={`inline-flex items-center justify-center rounded-full px-2 py-1 text-[10px] font-black ${
+                                              isExtendedBlock
+                                                ? isMine
+                                                  ? 'bg-white/15 text-amber-100'
+                                                  : 'bg-amber-200 text-amber-800'
+                                                : isMine
+                                                  ? 'bg-amber-400/20 text-amber-200'
+                                                  : 'bg-amber-500/15 text-amber-600'
+                                            }`}
+                                            title="Esta reserva tiene notas"
+                                          >
+                                            <MessageSquare size={14} />
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </button>
                                 ) : (
